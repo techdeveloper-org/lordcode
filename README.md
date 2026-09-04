@@ -83,6 +83,20 @@ Typically **40–80+ specialist invocations per requirement**. That is the produ
 
 Everything else — agents, skills, knowledge graphs — is compiled into the binary. **No network access is needed to resolve a persona or a skill.** Only the model calls themselves go out.
 
+### What a run costs
+
+Be clear-eyed about this before you install. LordCode runs a **full SDLC** per requirement — typically **40–80+ specialist invocations**, not one model call — and every token is billed to *your* provider account.
+
+| | Estimated cost per requirement |
+|---|---|
+| Typical range | **$4.5 – $39** |
+| p95 | **$31 – $46** |
+| Worst case (full self-correction re-route) | **$87 – $130** |
+
+The spread is wide because it depends on how much of the pipeline a requirement actually triggers and which model tier the router selects for each invocation. Tier-C invocations are only ~15% of the count but drive most of the bill. The cascade router exists precisely to keep this down — it is roughly **100× cheaper than sending every invocation to the frontier tier** — but the honest headline is that a thorough run is not cheap, and LordCode does not pretend otherwise.
+
+*These figures are derived, not measured — from published provider pricing and a modelled tier mix, with the range carrying that uncertainty. They will be replaced with measured numbers once the eval harness lands. The full derivation is in [`docs/phase-1-architecture/cost_model.md`](docs/phase-1-architecture/cost_model.md).*
+
 ### To build LordCode (contributors)
 
 - Go toolchain (version pinned once Phase 1 fixes it)
@@ -131,7 +145,7 @@ lordcode --version
 Planned behaviours worth knowing about:
 
 - **`NO_COLOR` is respected**, and no state is ever conveyed by colour alone — every status distinguished by colour is also distinguished by a symbol or word.
-- **A run reports what it cost**, broken down per phase, after it finishes. There is deliberately **no spend ceiling and no pre-run approval prompt** — a thorough run costing real tokens is the tool working as intended. Runaway loops are prevented structurally by hard turn and budget bounds in the agent loop.
+- **You see the estimated cost before a run starts, and the actual cost after it finishes** — the latter broken down per phase. The pre-run figure is a **range, not a point estimate**, and it does **not** block: the run proceeds without a confirmation keystroke. There is deliberately no spend ceiling and no approval prompt — a thorough run costing real tokens is the tool working as intended. Runaway loops are prevented structurally instead, by hard turn and budget bounds inside the agent loop.
 - **A team daemon** with an HTTP/OpenAPI surface is in scope from v1, with per-user credential and context isolation.
 
 ---

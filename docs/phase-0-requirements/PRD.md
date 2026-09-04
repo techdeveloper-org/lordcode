@@ -151,6 +151,7 @@ Every FR quotes its source verbatim from `docs/orchestration_prompt.md` so the r
 | FR-COR-004 | The system SHALL provide a routability audit, run at build/CI time, that for every one of the 528 compiled agents verifies (a) the agent is reachable from at least one node/branch/pattern in the compiled 23-node/82-branch decision tree or its own domain KG routing entry, and (b) every skill in its mandatory skill set is present per FR-COR-002. The audit SHALL emit a machine-readable `routability_report.json` stating a routability ratio = (agents reachable) / 528. A ratio below 1.0 SHALL fail the build. | M | STK-001, STK-005 | TBD |
 | FR-COR-005 | The system SHALL compile a `library_version` provenance stamp (value and build date of the source library) into the binary and SHALL surface it via a version-reporting command. | M | STK-001 | TBD |
 | FR-COR-006 | After a pipeline run completes, the system SHALL display the token/dollar cost of that run broken down per SDLC phase. The system SHALL NOT require pre-run cost approval or enforce a spend ceiling. | M | STK-001, STK-002 | TBD |
+| FR-COR-007 | Before dispatching the first agent invocation of a pipeline run, the system SHALL display a non-blocking estimated cost range for that run, derived from the planned phase set, the expected invocation count, and the router's projected tier mix. The estimate SHALL be presented as a range with its basis stated, never as a single point figure. **This is a DISPLAY, not a gate**: the run SHALL proceed without any confirmation keystroke, and FR-COR-006's prohibition on pre-run cost *approval* and on spend ceilings remains binding and is not weakened by this requirement. Where the estimate's inputs are provisional (see AI-4), the display SHALL say so. | M | STK-001, STK-002 | TBD |
 
 **Acceptance Criteria:**
 
@@ -183,6 +184,17 @@ AC-FR-COR-006: Given a completed LordCode pipeline run,
   When the run finishes,
   Then LordCode displays a cost summary itemised by SDLC phase
   And no prompt requesting cost pre-approval was shown before or during the run.
+
+AC-FR-COR-007: Given a user has issued a requirement and the pipeline's phase set is resolved,
+  When LordCode begins the run,
+  Then an estimated cost RANGE for the run is displayed before the first agent invocation is dispatched
+  And the range states what it was derived from (phase set, expected invocation count, projected tier mix)
+  And the run proceeds to the first invocation without waiting for any confirmation input.
+
+AC-FR-COR-007b: Given the cost estimate's tier-mix input is still derived from the PROVISIONAL
+    cold-start ranking rather than measured paired data,
+  When the pre-run estimate is displayed,
+  Then the display states that the estimate is provisional and names what would make it definitive.
 ```
 
 ### 5.2 Component 2 — Multi-provider model routing

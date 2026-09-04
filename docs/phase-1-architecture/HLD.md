@@ -1672,6 +1672,7 @@ Twelve items. Two were raised speculatively before the derivation and are now **
 | FR-COR-004 | Routability audit report | M | `buildgen` (C15) — BFS reachability | §10.4 #3, §11.6(iii) | TBD | Designed |
 | FR-COR-005 | Version provenance stamp | M | `buildgen` (C15) → `corpus` (C7) → `cli` (C1) | §10.4 #9 | TBD | Designed |
 | FR-COR-006 | Post-run per-phase cost display | M | `costmeter` (C11) + `termui` (C14) | §9.1, §7.3-C | TBD | Designed |
+| FR-COR-007 | Pre-run non-blocking cost estimate | M | `sdlc-engine` (C3) resolved phase set → `router` (C4) projected tier mix → `costmeter` (C11) → `termui` (C14) | §7.3-C, §9.1, §9.2 | TBD | **Added post-HLD (AI-9 consequence)** |
 | FR-RTG-001 | Three first-class providers + open adapter | M | `provider-adapters` (C6) | §9.5 | TBD | Designed |
 | FR-RTG-002 | No primary/degraded provider tier | M | `router` (C4) — filter-then-rank over configured set | §7.3, §11.4 | TBD | Designed |
 | FR-RTG-003 | Per-invocation model selection | M | `router` (C4) | §7.3 | TBD | Designed |
@@ -1730,7 +1731,9 @@ Twelve items. Two were raised speculatively before the derivation and are now **
 | NFR-PERF-002 | Platform-correct directory APIs | M | `cli` (C1) config, `credstore` (C9) vault, `state-store` (C10), log dir — **no corpus cache dir exists** | §3.4 | TBD | Designed |
 | NFR-DPD-001 | Testable per-user context isolation | M | `daemon` (C2) namespace separation + similarity check | §10.1 | TBD | Designed |
 
-**Coverage: 62/62 = 1.0.** No FR or NFR is unassigned. The `Test Case (Phase D)` column remains staged by design, per CF-2's own framing — it is Phase D's deliverable, not this document's.
+**Coverage: 63/63 = 1.0.** No FR or NFR is unassigned. The `Test Case (Phase D)` column remains staged by design, per CF-2's own framing — it is Phase D's deliverable, not this document's.
+
+> **FR-COR-007 was added after this HLD was written**, as a direct consequence of the AI-9 resolution: the corrected per-requirement band is $4.5–$39 (p95 ≈ $31–$46, full re-route ≈ $87–$130), roughly an order of magnitude above the $0.8–$4.7 the product decisions were originally taken against. A user spending on their own account at that scale should see the number before the run, not only after it. It is a **display, not a gate** — FR-COR-006's prohibition on pre-run *approval* and on spend ceilings is unchanged, and the run does not wait for input. No new component is introduced; the estimate composes `sdlc-engine`'s resolved phase set, `router`'s projected tier mix, and `costmeter`'s existing per-tier CPST model, rendered by `termui`.
 
 ---
 
