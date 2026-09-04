@@ -1,8 +1,8 @@
 # Cost Model — LordCode Multi-Model Router
 
-**Status:** DRAFT — pending `hallucination-detector` review and the Phase D.1.5 Independent Verification Gate (a fresh agent must re-derive every number below from public pricing alone; every formula is written to make that possible without seeing this derivation)
+**Status:** DRAFT — AI-9 BLOCKER (5.53× token-per-invocation discrepancy with `harness_control_policy.json`) resolved in this revision, see §0.1; pending `hallucination-detector` review and the Phase D.1.5 Independent Verification Gate (a fresh agent must re-derive every number below from public pricing alone; every formula is written to make that possible without seeing this derivation)
 **Author:** `llm-cost-optimizer`
-**Date:** 2026-09-04
+**Date:** 2026-09-04 (original derivation); **revised 2026-09-04** (§0.1 AI-9 resolution, same-day re-dispatch per HLD §13)
 **Consumers:** `multi-model-router-architect` (router objective function `S_cost(m)`), `solution-architect` (HLD cost-reporting integration), `harness-engineering-architect` (post-run cost display, FR-COR-006), `security-lead-auditor` (Phase F cost-of-verification context)
 **Depends on / builds on:** `docs/phase-1-architecture/provider_catalogue.md` (verified 2026-09-04 pricing, DNA scorecard, TOPSIS ranking — **not re-fetched or redone here**), `docs/phase-1-architecture/adr1_router_topology.md` (DNA-ranked cascade topology, θ_min=0.60, per-(provider,tier) circuit breakers), `docs/orchestration_prompt.md`, `docs/phase-0-requirements/PRD.md` §5.2 (FR-RTG), §OAQ-5, §12.3
 
@@ -39,7 +39,53 @@ Both corrections are computed from formulas already published in the skills this
 
 ---
 
+## §0.1 AI-9 Resolution (2026-09-04)
+
+**Status: RESOLVED. This document was wrong. Every CPST, per-requirement, and self-host figure below is superseded by the corrected figures in this section; §1–§9 are being updated in place to carry the correction forward, and the un-updated worked numbers that remain elsewhere in this document should be read as historical (marked accordingly) rather than current.**
+
+**The question (per HLD §13 AI-9, BLOCKER).** `cost_model.md` and `harness_control_policy.json` disagree by 5.53× on tokens per invocation (9,250 vs 51,157). Is this document's `T_in` (3,000 / 8,000 / 15,000 for Tier A/B/C) a per-**turn** figure or a per-**invocation** figure?
+
+**The answer: per-turn. This document was wrong.**
+
+**Why.** `token-economics-core`'s base CPST formula — `CPST = C_raw/s` where `C_raw = T_in·p_in + T_out·p_out` — is defined for a single-shot API attempt: "T_in = expected input tokens per attempt." This document (§1, as originally written) applied that formula directly to a LordCode "invocation," treating `T_in` as the total input tokens for the whole invocation. But per `harness_control_policy.json`'s `loop_lifecycle` and `stop_predicate` sections, a LordCode invocation is **not** one API call — it is a multi-turn agent loop (`LLM call -> inspect response -> tool dispatch -> result fed back -> continue-or-stop`), bounded by `T_max` and averaging `E[T] = 1/p` turns for its invocation class (`agent-loop-lifecycle-core` M5). Because the harness has no server-side conversation state, every turn resends the full accumulated context — so total input tokens across one invocation's turns is not `T_in`, it is the triangular sum `Cost_replay(T) = c·T(T+1)/2 = Θ(T²)` (`stop-condition-budget-control-core` M2, cited directly in the policy file). Two independent lines of evidence confirm the per-turn reading:
+
+1. **Magnitude.** `provider_catalogue.md`'s Context Budget fields for a single specialist dispatch run 20,000–32,000 tokens undivided; the harness policy's own `c=2,000 tokens/turn` placeholder is that same figure "divided across an assumed multi-turn footprint" (`harness_control_policy.json` line 123). This document's `T_in=8,000` for Tier B sits squarely in the scale of *one* such dispatch, not a 6–7-turn accumulation of them.
+2. **Arithmetic.** Treating `T_in=8,000` as the *average* per-turn input over a growing-context loop (average = `c(T+1)/2`) and solving for the implied per-turn increment `c` at Tier B's class (`class_I`, `E[T]=6.67`, per `harness_control_policy.json`'s `t_max_by_class.class_I_implementation`) gives `c = 2×8,000/(6.67+1) ≈ 2,087` — within 4% of the harness's own independently-stated `c=2,000` placeholder. This is not a coincidence: it is the same quantity, arrived at two different ways, agreeing to within rounding. The harness's `Cost_replay(6.67 turns) ≈ 51,157` (its own worked "realistic_expected_illustrative" figure) and `T_in=8,000 × E[T]=6.67 ≈ 53,360` are the same reconciliation from opposite directions.
+
+Silence in this document is a third, independent tell: nowhere in the original text does `cost_model.md` mention turns, tool-calling loops, or replay cost — it modeled every invocation as one round-trip, which is the token-economics-core default and is wrong for this specific product's architecture.
+
+**One caveat on the mapping used below, stated so it is not overclaimed.** `cost_model.md`'s Tier A/B/C (which *model* a task is routed to) and `harness_control_policy.json`'s `class_R`/`class_I`/`class_S` (how many *turns* an invocation's loop takes) are **two different axes**, not the same one. `class_R`'s own example roster ("business-analyst-agent, product-manager-agent, **solution-architect**... reviewers") includes `solution-architect`, which this document's §5.1 places in **Tier C** (capability-critical) — i.e., a real agent can be Tier-C-by-model and class-R-by-turn-count simultaneously. The diagonal mapping used below (Tier A↔class_R, Tier B↔class_I, Tier C↔class_S) is the same simplification `solution-architect`'s HLD §11.3 Finding 10 used to produce its reconciliation, adopted here for the same reason: Tier B is described (§5.1) as "the majority of domain-specialist agent invocations," and `class_I`'s roster ("go-systems-engineer, database-engineer, devops-engineer — write/build/test loops") is a plausible match for that majority; Phase F security agents are Tier C by model *and* named explicitly under `class_S`. It is an aggregate first-order approximation, not a verified per-agent mapping, and it is a **second, distinct source of uncertainty on top of** the CIs below — exactly the kind of thing a fresh per-agent-class join (crossing model-tier against turn-class) should tighten once real telemetry exists. Flagged, not resolved, here.
+
+**What changes, and by how much.** Because every invocation's true cost is the sum over its `E[T]` turns, not one turn's worth, and because ADR-1 §7 pins one invocation to one provider/model for its full duration (cost_model §3.2) — meaning the repeated portion of each turn's growing context is prompt-cache-eligible — the correction has two different magnitudes depending on whether that intra-invocation cache is actually being hit:
+
+| Quantity | Original (wrong) | Corrected — cache-adjusted (central estimate) | Corrected — no-cache (upper bound) |
+|---|---|---|---|
+| Tier A / class_R (`E[T]=3.33`) CPST | $0.005263/inv | **$0.013657/inv (×2.59)** | $0.017544/inv (×3.33) |
+| Tier B / class_I (`E[T]=6.67`) CPST | $0.034444/inv | **$0.158519/inv (×4.60)** | $0.229630/inv (×6.67) |
+| Tier C / class_S (`E[T]=10.0`) CPST | $0.176471/inv | **$1.155080/inv (×6.55)** | $1.764706/inv (×10.00) |
+| Weighted (25/60/15 tier mix) CPST | $0.048453/inv | **$0.271787/inv (×5.61)** | $0.406870/inv (×8.40) |
+| Weighted tokens/inv (in+out) — **bandwidth-relevant, caching does NOT reduce this** | 9,250 | **67,833 (×7.33)** | 67,833 (×7.33, same — caching doesn't change bytes transmitted) |
+| Per-requirement, Anthropic-only, N=60 | $2.907 | **$16.31 (×5.61)** | $24.41 (×8.40) |
+
+**Why two figures, not one.** The raw-token/bandwidth figure (67,833 tok/inv, ×7.33) is unaffected by caching — caching avoids the *provider re-computing* the repeated prefix, not the *client re-transmitting* it; every byte of the growing context still crosses the wire on every turn (relevant to HLD §11.3's egress/ingress figures, corrected below). The **dollar** figure is smaller than the raw-token ratio would suggest, because Anthropic's cache-read price (0.10× standard input) applies to the repeated portion of each turn's context under the sticky per-invocation routing this project already adopted for an unrelated reason (FR-HRN-001 replay determinism). The no-cache column is the honest upper bound for when that caching assumption does not hold (a cache-TTL miss, a circuit-breaker-triggered mid-invocation provider change, or a provider without Anthropic's specific cache-pricing ratio). **Both bounds, not just the cache-adjusted point estimate, should be carried forward** — this is what "every estimate carries an uncertainty range" requires here, on top of (not instead of) the pre-existing tier-mix and Sonnet-5-pricing uncertainty already carried in §1 and §5.
+
+**A finding this correction produces, not merely a scaling exercise.** The cascade's economic case *strengthens* under correction, not weakens. Re-deriving §2.2's 3-tier worked example (OpenAI nano→mini→gpt-5.5) with the same class-based multipliers (Tier A ×2.59, Tier B ×4.60, Tier C ×6.55 — using the diagonal mapping's caveat above): `CPST_cascade` moves from $0.002708/inv to **≈$0.01214/inv (×4.48)**, while `always-Tier-C` moves from $0.194118/inv to **≈$1.2715/inv (×6.55)**. Because the terminal, most-expensive tier (Tier C, `E[T]=10`, the largest correction factor) is reached only `(1−g_A)(1−g_B)=0.5%` of the time, the cascade's advantage over always-Tier-C **grows** from ~71.7× to **~104.7×**. AI-9's resolution reinforces ADR-1's cascade design; it does not call it into question.
+
+**Downstream figures corrected by this resolution:**
+
+- **§1 CPST per tier and §2 CPST_cascade** — see the two tables above; §1's Sonnet-5 secondary-rate sensitivity (+50.0%, §0 Correction 1) is **unaffected** — it is a ratio between two rates that both scale by the identical turn-count and cache-structure factor, so the percentage cancels. AI-3's fix downstream is unaffected by AI-9.
+- **§5.5 per-requirement headline range ($0.8–$4.7)** — becomes **≈$4.5–$26 (cache-adjusted central estimate) to ≈$6.7–$39 (no-cache upper bound)**, per requirement, before folding in AI-7's self-correction-retry overhead (next bullet).
+- **HLD §6.6's SC/re-route figures (p95 ≈ $5.5, full-SC ≈ $6.6, full-re-route ≈ $15.5)** were computed from the *pre-correction* $0.8–$4.7 baseline and inherit the same 5.61×–8.40× understatement. Applying HLD §6.6's own SC/re-route overlay ratios (p95/typical-high = 1.17×, full-SC/typical-high = 1.40×, full-re-route/typical-high = 3.30×) to the corrected high end: **p95 ≈ $31–$46, full SC-budget ≈ $37–$55, full re-route (`R_max`/`N_max`-bounded) ≈ $87–$130**. This is the corrected version of AI-7's fix — see §5.5 below, updated in place.
+- **HLD §11.3's egress bandwidth** — Finding 10 used only `class_I`'s 51,157 tok/inv (input-only, and did not separately correct output tokens for multi-turn accumulation). The tier-weighted, both-legs-corrected figure is 67,833 tok/inv (57,000 in / 10,833 out) — at 4 B/token and ×1.20 wire overhead: **egress ≈ 273.6 KB/inv (16.4 MB/req at N=60)**, **ingress ≈ 52.0 KB/inv (3.1 MB/req)** — both are refinements of, not contradictions of, HLD §11.3's conclusion that bandwidth is never a binding constraint (0.2–1.7 Mbit/s sustained still holds at these corrected figures; the constraint that binds is unchanged, per HLD Finding 7).
+- **§8 self-host V\*** — recomputed below (§8.1a). **Conclusion unchanged**: self-hosting remains uneconomical at any realistic individual/small-team LordCode usage volume, because the pre-existing safety margin (realistic usage at 3.8–19% of `V*`) is wide enough to absorb the correction in either direction.
+
+**What is NOT resolved by this correction** — carried forward, not newly introduced: the tier-mix (25/60/15%) is still a reasoned, unmeasured assumption (§5.1); the per-turn increment `c=2,000` is still `harness_control_policy.json`'s own explicitly-provisional placeholder pending `go-systems-engineer`'s measured telemetry; and the Tier↔class diagonal mapping above is a first-order approximation, not a verified per-agent join. All three should be revisited together, from real telemetry, once LordCode ships (`go-systems-engineer`'s Phase H replay measurements are the natural source for both `c` and the tier↔class join).
+
+---
+
 ## 1. CPST — The Primary Metric, With Its 95% CI
+
+**Note (2026-09-04): the T_in/T_out figures and CPST values in this section are the pre-AI-9-resolution, per-turn figures. They remain correct as characterizations of a single turn's input/output size, but are no longer used directly as per-invocation cost inputs — see §0.1 for the corrected per-invocation figures, which multiply each tier's figures below by that tier's expected turn count `E[T]`.**
 
 Per this agent's binding operating rule, **cost-per-successful-task (CPST) is the only cost metric used anywhere in this document — never cost-per-call.** For a task attempted at success rate `s`:
 
@@ -97,6 +143,8 @@ CPST_cascade = 0.0011 + (0.05)(0.01275) + (0.05)(0.10)(0.194118)
 ```
 
 This is **~71.7× cheaper than always-Tier-C** ($194.118/1,000 inv), and cheaper than the two-model cascade above, because the three-tier ladder only reaches the expensive terminal tier `(1−g_A)(1−g_B) = 0.5%` of the time.
+
+**AI-9 correction to this worked example (§0.1):** these per-attempt costs (`C_A`, `C_B`, `C_C/s_C`) inherit the same per-turn/per-invocation issue as the Tier A/B/C figures above. Applying §0.1's class-based multipliers (Tier A ×2.59, Tier B ×4.60, Tier C ×6.55, cache-adjusted) moves `CPST_cascade(A→B→C)` from $0.002708/inv to **≈$0.01214/inv**, and `always-Tier-C` from $0.194118/inv to **≈$1.2715/inv**. Because the correction is largest for the tier reached least often (Tier C, `E[T]=10`), the cascade's advantage over always-Tier-C *increases* under correction, from ~71.7× to **~104.7×**. This is a genuine finding, not just rescaling: AI-9's resolution makes ADR-1's cascade design look better, not worse.
 
 ### 2.3 A genuine finding this derivation surfaces: escalation is not always cheaper than flat retry
 
@@ -258,7 +306,20 @@ Point estimate = 60 × 0.0204367 = $1.2262
 | Anthropic only (primary rate) | $1.938 | $2.907 | $3.876 |
 | Anthropic only (secondary rate, if active) | $2.352 | $3.527 | $4.703 |
 
-**Headline range: roughly $0.8–$4.7 per requirement**, order-of-magnitude "sub-dollar to a few dollars," with a typical multi-provider central estimate around **$1.2–$1.6** — and up to **~$4.70** in the worst realistic single-provider-configured case if the secondary Anthropic rate turns out to be active. Every figure here inherits the §5.1 tier-mix assumption's own uncertainty on top of the stated CIs — the CIs above bound the *pricing* uncertainty given the tier mix, not the tier-mix assumption itself, which is a second, currently-unmeasured source of error this document does not attempt to quantify further.
+**Table above is superseded — see §0.1 (AI-9) and the corrected headline immediately below.** The $0.8–$4.7 range in the table was computed treating each tier's `T_in`/`T_out` as the total per-invocation token count; §0.1 establishes that these are per-turn figures, and a LordCode invocation averages `E[T]` turns per its invocation class. Retained above for audit trail, not as a current figure.
+
+**Corrected headline range (AI-9-resolved, AI-7-inclusive — the two fixes compound and are reported together because presenting either alone would leave the other silently excluded).**
+
+Applying §0.1's per-tier correction factors (cache-adjusted ×5.61 central / no-cache ×8.40 upper bound) to the table above's $0.8–$4.7 span:
+
+| Cost scenario | Cache-adjusted (central estimate) | No-cache (upper bound) |
+|---|---|---|
+| **Typical** (N=40–80, all provider configs) | **$4.5 – $26** | $6.7 – $39 |
+| **p95** (adds self-correction retries, HLD §6.6, AI-7) | **≈ $31** | ≈ $46 |
+| **Full SC.1–SC.3 budget exercised on every gate** | **≈ $37** | ≈ $55 |
+| **Full re-route, bounded by `R_max`/`N_max` (HLD §6.6)** | **≈ $87** | ≈ $130 |
+
+**Headline, stated with both its dimensions of uncertainty:** typical per-requirement cost is roughly **$4.5–$39**, an order of magnitude higher than this document's original $0.8–$4.7 figure, because that figure both (a) omitted self-correction retries (AI-7) and (b) undercounted per-invocation tokens by treating a per-turn figure as a per-invocation total (AI-9). The width of the cache-adjusted-to-no-cache band (roughly 1.5×) reflects whether ADR-1's intra-invocation prompt-cache preservation is actually being hit in production — an empirical question this document cannot answer without telemetry, exactly like the pre-existing §5.1 tier-mix assumption and the §5.2 statistical-correlation caveat, both of which still apply on top of this range and are not superseded by AI-9's resolution.
 
 ### 5.6 Dominant cost driver
 
@@ -324,6 +385,23 @@ V* = C_self_fixed_monthly / (C_API_per_token − C_self_per_token)
 V* = $3,074.43 / ($2.209 − $0.117) = $3,074.43 / $2.092 = 1,469 million tokens/month ≈ 1.47 billion tokens/month
 ```
 
+### 8.1a AI-9 correction — does it move V\*?
+
+§0.1 (AI-9) revises both inputs to `V* = C_self_fixed_monthly / (C_API_per_token − C_self_per_token)`: `C_API_per_token` is derived from a $/inv-over-tokens/inv ratio, and **both** the numerator ($/inv) and denominator (tokens/inv) move under the correction, in the same direction but not by the same factor — so the net effect on the *blended $/M-token rate* (not on V\* directly) depends on caching effectiveness:
+
+```
+No-cache:      $/M = 0.406870 / 0.067833 = $5.999/M   (vs. this section's original $2.209/M — RATE RISES)
+Cache-adjusted: $/M = 0.271787 / 0.067833 = $4.007/M   (still above $2.209/M, but the cache discount pulls the
+                                                          rate down relative to the no-cache case, because caching
+                                                          suppresses the $ numerator faster than it suppresses the
+                                                          token denominator — see §0.1's ×5.61 vs ×7.33 factors)
+```
+(Anthropic-only figures shown for full traceability to §0.1's worked tables; a full per-provider re-derivation of the multi-provider-best-available scenario's blended rate is out of scope for this dispatch and is flagged as follow-up work, not silently assumed away.)
+
+**Direction:** a higher $/M rate makes self-hosting *relatively more attractive* (lower `V*`), by roughly the same 1.8×–2.7× the rate itself moved. Even at the no-cache upper bound (~2.7× higher rate), `V*` falls from ≈1.47B to **≈540M tokens/month** — still **~2–5× the extreme team-scale usage estimate below (277.5M tokens/month)**, not below it.
+
+**Conclusion unchanged.** The pre-existing safety margin between `V*` and realistic usage (§8.2, originally ~5×–26×) absorbs AI-9's correction in either direction without flipping the recommendation. Self-hosting remains uneconomical as a LordCode-provisioned default at any volume an individual developer or small team plausibly reaches.
+
 ### 8.2 Realistic user volume vs. V*
 
 At 9,250 tokens/invocation and a generous active-power-user estimate of 100 requirements/month at 60 invocations each (6,000 invocations/month):
@@ -348,13 +426,14 @@ Self-hosting is not economical at any volume a single LordCode user (or a small 
 
 | Item | This document's answer | Feeds |
 |---|---|---|
-| CPST formula + 95% CI (delta method) | §1 | Router's `S_cost(m)` term |
+| **AI-9 resolution: T_in/T_out were per-turn, not per-invocation** | **§0.1 — corrected CPST ×5.61 (cache-adj.) to ×8.40 (no-cache); tokens/inv ×7.33** | Every downstream figure in this table |
+| CPST formula + 95% CI (delta method) | §1 (superseded per-turn figures; see §0.1 for per-invocation) | Router's `S_cost(m)` term |
 | Sonnet-5 pricing uncertainty, corrected | §0 (+50.0%, not +25.8%) | Every Anthropic-inclusive total in §5–§6 |
 | CPST_cascade matching ADR-1's actual ladder | §2 (2-tier and 3-tier derivations; escalation-price-jump finding) | Confidence-gate/ranking design (ADR-1 §3–§4) |
 | Prompt-cache break-even | §3.1 (21.7%, scale-invariant) | Cache-monitoring alert threshold |
 | Sticky-routing recommendation | §3.3 — conditional tie-break, quantified trade-off | Router persona-affinity design |
 | "Cost saved via routing" — publishable metric | §4 (baseline definition + conservative-bias caveat + 64–81% worked range) | FR-COR-006 post-run cost display |
-| Per-requirement cost, 40–80 invocations, with CI | §5 ($0.8–$4.7 headline range; Tier-C dominant cost driver) | User-facing cost expectations |
+| Per-requirement cost, 40–80 invocations, with CI | §5.5 (**corrected: $4.5–$39 typical, ≈$31–$46 p95, ≈$87–$130 full re-route — see §0.1**; Tier-C dominant cost driver unchanged) | User-facing cost expectations |
 | India GST RCM | §6 (pass-through, ITC-eligible → net ≈0) | User's own accounting, not LordCode's |
 | Batch API applicability | §7 (not applicable — stated, not omitted) | Confirms no batch-mode cost lever exists for this product |
 | Self-host recommendation | §8 (No — V*≈1.47B tokens/month vs. realistic ≤277M) | Confirms OAQ-5/FR-RTG-001's adapter-only self-host path |
@@ -370,7 +449,17 @@ AGENT OUTPUT
   Stack:         DNA-ranked cascade (ADR-1) — CPST-driven router objective function
   India Context: GST RCM applied to §5.5's headline range (§6); pass-through only, no
                  LordCode-side billing/compliance liability (OAQ-5)
-  Deliverables:  CPST + 95% CI methodology (§1), CPST_cascade matching ADR-1's actual
+  Deliverables:  AI-9 BLOCKER resolution (§0.1) — T_in/T_out were per-turn not
+                 per-invocation; every CPST/per-requirement/bandwidth figure corrected
+                 ×5.61 (cache-adjusted) to ×8.40 (no-cache). AI-7 fix folded into the
+                 same corrected §5.5 range (typical $4.5-$39, p95≈$31-$46, full
+                 re-route≈$87-$130). AI-3 unaffected (Sonnet-5 +50.0% sensitivity is a
+                 ratio, invariant to the AI-9 correction) — replacement text for
+                 provider_catalogue.md §1.1/§8.2 emitted separately for
+                 genai-procurement-analyst. Cascade finding STRENGTHENS under correction
+                 (~104.7x vs always-Tier-C, up from ~71.7x). Self-host §8 conclusion
+                 UNCHANGED (safety margin absorbs the correction either direction).
+                 CPST + 95% CI methodology (§1), CPST_cascade matching ADR-1's actual
                  escalation ladder incl. a router-design finding (§2), prompt-cache
                  break-even + conditional sticky-routing recommendation with quantified
                  trade-off (§3), "cost saved via routing" publishable metric with stated
@@ -379,8 +468,12 @@ AGENT OUTPUT
                  (§6), Batch API inapplicability (§7), self-host V* break-even and No
                  recommendation (§8). Two upstream arithmetic errors in provider_catalogue.md
                  and token-economics-core identified and corrected (§0), not silently fixed.
-  Status:        DRAFT — pending hallucination-detector review and Phase D.1.5 Independent
-                 Verification Gate
+  Status:        DRAFT — AI-9 BLOCKER resolved in this revision; pending
+                 hallucination-detector review and Phase D.1.5 Independent Verification
+                 Gate on both the original derivation and this correction
   Next:          hallucination-detector review -> multi-model-router-architect (S_cost(m)
-                 integration) -> solution-architect (HLD cost-reporting integration)
+                 integration, using §0.1's corrected CPST) -> solution-architect (HLD
+                 cost-reporting integration; HLD §0/§11.3/§11.8/§13 all need the
+                 corrected figures merged in) -> genai-procurement-analyst (AI-3
+                 replacement text below)
 ```

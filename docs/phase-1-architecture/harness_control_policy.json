@@ -6,9 +6,33 @@
   "supersedes_note": "Alignment 6 verdict below is a POSITION for solution-architect to confirm or reject in Phase 1, per agent.md Core Responsibility and ORCHESTRATION_TEMPLATE STEP 10.5 pair 6. Once docs/phase-1-architecture/HLD.md exists, this artifact must be re-read against it and promoted to REVIEWED, then APPROVED after consensus-agent's BINARY gate.",
   "dual_purpose_note": "This single JSON file governs TWO distinct things, kept separate in every section below via a 'scope' tag: (1) 'build_pipeline' = the LangGraph/orchestration harness executing THIS SDLC pipeline that builds LordCode; (2) 'product_design' = the harness LordCode itself ships to end users. They share the same mathematical machinery (same skills, same formulas) but are configured with different, independently-calibrated numbers because they run different workloads.",
 
+  "corrections": {
+    "note": "Numeric corrections against solution-architect's HLD.md (docs/phase-1-architecture/HLD.md, Section 11.3 Finding 8, Section 11.5, Section 13 AI-8/AI-11). Each entry records the published value, the corrected value, the cause of the error, and its direction, so the mistake is not repeated silently.",
+    "AI-8": {
+      "severity": "HIGH",
+      "field": "circuit_breaker_policy.trip_rule.false_trip_check.P_false_trip",
+      "published_value": "~1.3e-9 (z=5.96, via a normal approximation to the binomial tail)",
+      "corrected_value": "7.2e-6 (7.151e-6 precise), via the EXACT binomial tail sum_{k=10}^{20} C(20,k) 0.10^k 0.90^(20-k)",
+      "cause": "the normal approximation to the binomial (Phi((theta-r0)*sqrt(N)/sqrt(r0(1-r0)))) was applied at np = N*r0 = 20*0.10 = 2, far below the np>=10 validity rule for that approximation. At small np the binomial at p=0.10 is severely right-skewed and the CLT-based approximation is not valid — the exact binomial tail must be used instead, exactly as retry-backoff-circuit-breaker-core M5 states the general method should be, even though that skill's own worked example at these same parameters made the same approximation error.",
+      "direction_of_error": "UNSAFE. The published figure understated the true false-trip probability by a factor of ~5,700x, making the breaker look far more resistant to spurious trips than it actually is. An error in this direction is worse than an overstatement, because it could lead an operator to under-provision monitoring/alerting around breaker trips on the belief they are near-impossible.",
+      "operational_verdict": "at the corrected 7.2e-6 rate the breaker remains adequately calibrated in absolute terms (~0.14 false trips/breaker/year, ~1.3/year across the deployment's 9 breakers) — theta=0.5 and N=20 do not need to move on false-trip grounds alone at the provisional r0=0.10 baseline. What must change is the METHOD (exact binomial, not normal approximation) and the number quoted, not the (theta,N) operating point itself.",
+      "verification": "independently re-derived by harness-engineering-architect via direct term-by-term binomial computation (k=10..20), cross-checked against HLD.md Section 11.5's identical exact-binomial derivation — both agree to 7.15e-6."
+    },
+    "AI-11": {
+      "severity": "HIGH",
+      "field": "routing_dispatch.daemon_worker_pool_sizing.minimum_stable_pool_c AND resource_elastic_policy.json:daemon_elastic_scaling.worked_example.minimum_stable_pool_c",
+      "published_value": "c = 134 (both policy files), shipped as if it were a usable worker-pool figure",
+      "corrected_value": "c ~= 30 for the illustrative 50-user team at realistic load (c_min=23 for bare stability at rho<1; c=30 at the rho<=0.75 elastic scale-up trigger). Restructured so lambda is an explicit Ops.2 measurement input and the sizing FORMULA is the shipped deliverable, not a fixed c.",
+      "cause": "c=134 was derived from an assumed lambda=5 arrivals/sec = 18,000 req/h. The realistic load for a 50-user team, at a plausible per-developer duty cycle (~8 req/dev/8h-day), is ~50 req/h = 0.833 invocations/sec — roughly 360x smaller. Both policy files DID correctly label lambda=5/s a placeholder, but still surfaced c=134 as a bare top-level 'minimum_stable_pool_c' field, which reads as a provisioned value even with a caveat attached elsewhere in the object.",
+      "direction_of_error": "OVER-PROVISIONING (~4.5x too many workers at the corrected realistic-load operating point), not a safety-direction error like AI-8 — the risk here is wasted infrastructure spend and a misleading capacity plan, not an unsafe gap.",
+      "operational_verdict": "lambda remains a genuine measurement input pending Ops.2's real RED-dashboard telemetry — no fixed c should ship as final. The illustrative c=30 worked example is retained specifically to demonstrate the sizing methodology (stability condition, rho<=0.75 trigger, Erlang-C wait) end-to-end, not as a provisioned deployment value.",
+      "verification": "independently re-derived by harness-engineering-architect via exact Erlang-B recursion + Erlang-C computation (c_min=23 at rho=0.9658; c=30 at rho=0.7404, P(wait)=8.07%, W_q=0.276s), cross-checked against HLD.md Section 11.3 Finding 8 — both agree to within rounding (HLD quotes P(wait)=8.0%, W_q=0.274s)."
+    }
+  },
+
   "math_delegation": {
     "owner": "harness-mathematics-expert (opus, Domain 50)",
-    "note": "No live math-agent invocation channel exists in this standalone dispatch (only claude/Explore/general-purpose/Plan/statusline-setup agent types are spawnable here). Every number below is a DIRECT APPLICATION of an already-derived, cited skill formula (M1-M6 of the six mandatory skills) — never an improvised derivation. Each result below carries its skill+section citation. Formal re-derivation, confidence intervals, and empirical recalibration from real telemetry remain harness-mathematics-expert's job once that agent is reachable in a live pipeline run.",
+    "note": "No live math-agent invocation channel exists in this standalone dispatch (only claude/Explore/general-purpose/Plan/statusline-setup agent types are spawnable here) — confirmed again during this correction pass (a direct Agent-tool call with subagent_type='harness-mathematics-expert' returned 'agent type not found'). Every number below, and every corrected number in the 'corrections' block above, is therefore a DIRECT APPLICATION of an already-derived, cited skill formula (M1-M6 of the six mandatory skills), independently verified by harness-engineering-architect via exact computation (binomial term summation; Erlang-B/Erlang-C recursion) rather than an improvised derivation. Each result carries its skill+section citation. Formal re-derivation, confidence intervals, and empirical recalibration from real telemetry remain harness-mathematics-expert's job once that agent is reachable in a live pipeline run.",
     "consumed_results": [
       "agent-loop-lifecycle-core M5: E[T]=1/p, T_max >= ln(1/delta)/ln(1/(1-p))",
       "agent-loop-lifecycle-core M3: L = lambda * E[T] * (l_LLM + l_tool)  (Little's Law, agentic form)",
@@ -18,7 +42,7 @@
       "retry-backoff-circuit-breaker-core M2: full jitter delay(n) = U(0,D(n))",
       "retry-backoff-circuit-breaker-core M3: E[attempts] = (1-p^k)/q",
       "retry-backoff-circuit-breaker-core M4: P(OPEN) = tau / (s/lambda_trip + tau + 1/mu_probe)",
-      "retry-backoff-circuit-breaker-core M5: binomial false-trip tail, worked at theta=0.5,N=20,r0=0.10 -> P(false trip)~=1.3e-9",
+      "retry-backoff-circuit-breaker-core M5: binomial false-trip tail, worked EXACTLY (not via normal approximation) at theta=0.5,N=20,r0=0.10 -> P(false trip)=7.2e-6 (corrected from an initially published 1.3e-9 normal-approximation figure invalid at np=N*r0=2, far below the np>=10 validity rule; see top-level 'corrections' block)",
       "tool-call-mediation-core M4: p* = c_a / (d * L_h)  (HITL expected-loss threshold)",
       "tool-call-mediation-core M2: P(correct) ~= 1/(k+1) for k confusable near-duplicate tools",
       "agent-routing-dispatch-policy-core M4: parallel iff no directed path in decomposition DAG; Kahn topological sort O(|V|+|E|); critical-path makespan lower bound",
@@ -160,9 +184,18 @@
       "failure_threshold_theta": 0.5,
       "false_trip_check": {
         "assumed_baseline_r0": 0.10,
-        "z_score": 5.96,
-        "P_false_trip": "~1.3e-9",
-        "citation": "retry-backoff-circuit-breaker-core M5 worked example at theta=0.5, N=20, r0=0.10 — directly reused since LordCode's provisional baseline matches the skill's own worked calibration point."
+        "method": "EXACT BINOMIAL TAIL, not a normal approximation. P(false trip) = P(X >= theta*N | X ~ Binomial(N, r0)) = sum_{k=ceil(theta*N)}^{N} C(N,k) r0^k (1-r0)^(N-k). The normal approximation is INVALID at this operating point: np = N*r0 = 20*0.10 = 2, far below the np>=10 validity rule, so the binomial's severe right-skew at p=0.10 is not captured by Phi().",
+        "exact_binomial_tail_terms_N20_r0_0.10": {
+          "k=10": "6.442e-6", "k=11": "6.507e-7", "k=12": "5.423e-8", "k=13": "3.708e-9", "k=14": "2.060e-10",
+          "k_ge_15_combined": "< 1e-11, negligible"
+        },
+        "P_false_trip": "7.2e-6",
+        "P_false_trip_precise": "7.151e-6",
+        "normal_approx_z_score_INVALID_DO_NOT_USE": 5.96,
+        "normal_approx_P_false_trip_WRONG_DO_NOT_QUOTE": "1.3e-9",
+        "error_magnitude": "the normal-approximation figure understated P(false trip) by a factor of ~5,700x — an UNSAFE-direction error, since it made the breaker look far more stable against spurious trips than it actually is.",
+        "operational_implication": "~20,000 rolling windows/breaker/year x 7.2e-6 ~= 0.14 false trips/breaker/year; ~1.3 false trips/year summed across this deployment's 9 breakers (see circuit_breaker_policy.granularity). This rate is operationally ACCEPTABLE at theta=0.5, N=20 as configured — no change to theta or N is required on false-trip grounds alone at the provisional r0=0.10 baseline. Recalibrate theta/N only if Phase H / Ops.2 telemetry shows a materially higher real per-provider healthy-baseline failure rate than r0=0.10.",
+        "citation": "retry-backoff-circuit-breaker-core M5 (exact binomial tail formula). The skill's own M5 worked example at these same theta=0.5,N=20,r0=0.10 parameters used a normal approximation, which is itself invalid at this np — see top-level 'corrections' block for the full record."
       }
     },
     "cooldown_tau_seconds": 30,
@@ -260,12 +293,32 @@
     },
     "daemon_worker_pool_sizing": {
       "citation": "agent-routing-dispatch-policy-core M5 (M/M/c)",
-      "stability_condition": "rho = lambda / (c * mu) < 1  =>  c > lambda / mu",
-      "worked_illustrative_example": {
-        "provisional_lambda_arrivals_per_sec": 5,
-        "derivation_of_mu": "E[T]_class_I = 1/p = 1/0.15 = 6.67 turns; W = E[T]*(l_LLM + l_tool) = 6.67*(3s+1s) = 26.7s; mu = 1/W = 0.0375 invocations/sec/worker",
-        "minimum_stable_pool_c": 134,
-        "note": "lambda and per-turn latencies (l_LLM, l_tool) are PLACEHOLDERS. site-reliability-engineer (Ops.2) must replace with measured RED-dashboard values before this number is used for real capacity planning; this is a sizing METHODOLOGY handoff, not a provisioned value."
+      "sizing_formula_DELIVERABLE_ship_this_not_a_number": {
+        "stability_condition": "rho = lambda / (c * mu) < 1  <=>  c_min > lambda / mu",
+        "elastic_scale_up_trigger": "operate at rho <= 0.75 (resource_elastic_policy.json:daemon_elastic_scaling.autoscale_trigger_policy) => smallest integer c such that lambda/(c*mu) <= 0.75",
+        "erlang_c_wait_probability": "P(wait) = C(c,a) = [a^c/c! * 1/(1-rho)] / [ sum_{k=0}^{c-1} a^k/k!  +  a^c/c! * 1/(1-rho) ],  where a = lambda/mu",
+        "wait_time_in_queue": "W_q = C(c,a) / (c*mu - lambda)",
+        "target_P_wait_this_is_sized_against": "rho<=0.75 is chosen to stay well clear of Erlang-C's sharp wait-probability inflection near rho=1, not against an independently fixed P(wait) SLA — the resulting P(wait) at the trigger is reported per-scenario below (e.g. ~8% at the 50-user worked point) and should be treated as the operating point this methodology produces, not a promised ceiling."
+      },
+      "lambda_MEASUREMENT_INPUT_PENDING_OPS2_do_not_ship_a_fixed_c": {
+        "status": "lambda (invocation arrival rate) is NOT a provisioned value in this artifact — it is a measurement input site-reliability-engineer (Ops.2) supplies from real RED-dashboard telemetry once the daemon is under live load. Re-run the sizing formula above against the measured lambda; do not carry any single c figure forward as 'the' pool size.",
+        "why_the_previously_published_c_134_was_wrong": "c=134 was derived from an assumed lambda=5 arrivals/sec = 18,000 req/h — roughly 360x the realistic load for a 50-user team (~50 req/h at a realistic per-developer duty cycle, per HLD.md Section 11.3 Finding 8). It over-provisioned the pool by ~4.5x. Corrected and recorded in the top-level 'corrections' block."
+      },
+      "mu_derivation_reusable_independent_of_lambda": "E[T]_class_I = 1/p = 1/0.15 = 6.67 turns; W = E[T]*(l_LLM + l_tool) = 6.67*(3s+1s) = 26.7s; mu = 1/W = 0.0375 invocations/sec/worker.",
+      "worked_example_50_user_team_ILLUSTRATIVE_METHODOLOGY_DEMO_NOT_A_SHIPPED_VALUE": {
+        "lambda_realistic_inv_per_sec": 0.833,
+        "lambda_basis": "50 req/h x 60 invocations/req / 3600 s/h, using a realistic per-team duty cycle (NOT the old placeholder lambda=5/s)",
+        "c_min_stability": 23,
+        "c_min_rho": 0.9658,
+        "c_at_rho_0.75_scale_up_trigger": 30,
+        "c_at_trigger_rho": 0.7404,
+        "erlang_b_at_c30": 0.02226,
+        "P_wait_at_c30": 0.0807,
+        "W_q_at_c30_seconds": 0.276,
+        "P_wait_at_c25_for_comparison": 0.4644,
+        "W_q_at_c25_seconds": 4.44,
+        "reading": "for THIS illustrative 50-user, realistic-load scenario the formula above resolves to c=30, not c=134. This is a demonstration of the methodology, not a provisioned value — re-run the same formula against Ops.2's real measured lambda before using any c figure for real capacity planning.",
+        "citation": "cross-checked against HLD.md Section 11.3 Finding 8 (Erlang-B recursion + Erlang-C), independently re-derived by harness-engineering-architect for this correction pass; both derivations agree to within rounding."
       }
     }
   },
@@ -280,7 +333,15 @@
       "wrong_model": "treating the whole 40-80-invocation run as ONE loop of T=(sum of all invocations' turns) and applying Cost_replay(T)=c*T(T+1)/2 to that combined T — this would be catastrophically over-quadratic and is explicitly the anti-pattern stop-condition-budget-control-core warns against ('budgeting a long-running loop's cost as linear... or the wrong horizon').",
       "correct_model": "each of the N=40-80 invocations gets an ISOLATED, freshly-bounded context per invocation (context-engineering-agent's DPDP-Section-4 per-story context isolation, already a named library convention for daemon per-user isolation under ADR-6). The quadratic Theta(T_i^2) cost RESETS per invocation. Total pipeline replay cost is therefore Sigma_{i=1}^{N} Cost_replay(T_i) = O(N * T_max^2) at worst case (linear in invocation count, quadratic only within each bounded invocation) — never O((N*T_max)^2).",
       "worst_case_illustrative": "N=80, all class_I, all hit T_max=30: 80 * 589800 (post-compaction total, see budget_guard_B_per_invocation derivation) ~= 47.2M tokens — an explicit upper bound, not an expectation.",
-      "realistic_expected_illustrative": "using E[T]=1/p=6.67 turns for class_I instead of the T_max worst case: per-invocation expected replay ~= c*E[T]*(E[T]+1)/2 = 2000*6.67*7.67/2 ~= 51,100 tokens; across N=80 ~= 4.09M tokens. This expected figure, itemised per phase, is the number FR-COR-006's post-run cost display should approximate — it is large but BOUNDED, consistent with the product's accepted-not-gated cost stance."
+      "realistic_expected_illustrative": "using E[T]=1/p=6.67 turns for class_I instead of the T_max worst case: per-invocation expected replay ~= c*E[T]*(E[T]+1)/2 = 2000*6.67*7.67/2 ~= 51,100 tokens; across N=80 ~= 4.09M tokens. This expected figure, itemised per phase, is the number FR-COR-006's post-run cost display should approximate — it is large but BOUNDED, consistent with the product's accepted-not-gated cost stance.",
+      "ai9_input_for_llm_cost_optimizer": {
+        "purpose": "AI-9 (BLOCKER: cost_model.md vs this file disagree 5.53x on tokens/invocation, 9,250 vs 51,157) is llm-cost-optimizer's to resolve, not harness-engineering-architect's — this sub-block states precisely what THIS file's 51,157 figure is, so that resolution has an unambiguous input. This does NOT resolve AI-9.",
+        "quantity_type": "PER-INVOCATION, not per-turn. One 'invocation' here means one bounded agent-loop run for one specialist agent (e.g. one class_I dispatch), spanning multiple turns up to its T_max — the same unit this file's stop_predicate and budget_guard_B_per_invocation sections define.",
+        "which_agent_class": "class_I_implementation (provisional_p=0.15, T_max=30) — the class this 51,157 figure was computed against. class_R and class_S have different E[T] and therefore different expected replay totals; this figure is NOT a cross-class average.",
+        "which_T": "E[T] = 1/p = 6.67 turns — the EXPECTED number of turns the loop actually runs before its own natural isFinal stop (agent-loop-lifecycle-core M5), NOT T_max=30 (the worst-case hard ceiling). 51,157 is therefore an EXPECTED-CASE cost, not a worst-case bound; the worst-case figure at T_max=30 is the much larger 589,800-token post-compaction total computed elsewhere in this same block.",
+        "how_the_replay_term_enters": "Cost_replay(T) = c*T(T+1)/2 (stop-condition-budget-control-core M2, Theta(T^2)) is the CUMULATIVE input-token cost of re-sending the growing conversation history on every one of the T turns inside ONE invocation — turn 1 replays ~c tokens, turn 2 replays ~2c, ..., turn T replays ~c*T, summing to c*T(T+1)/2 over all T turns. At c=2000 tok/turn and T=E[T]=6.67, this sums to ~51,100-51,157 tokens for the whole invocation. It is NOT 2,000 tokens (one turn) and NOT a T_max-worst-case, multi-invocation, or whole-pipeline figure — it is specifically the expected-case, single-invocation, quadratic-replay-summed total.",
+        "likely_reconciliation_with_cost_model.md": "per HLD.md Section 11.3 Finding 10: if cost_model.md's T_in=8,000 is PER TURN rather than per invocation, then 6.67 turns * 8,000 tok/turn = 53,360 tok/invocation, closely matching this file's 51,157 — the two documents may already agree once cost_model.md's own unit is clarified as per-turn. Offered as the likely reconciliation, not asserted as settled; llm-cost-optimizer owns confirming it."
+      }
     },
     "failure_semantics_invocation_57_of_80": {
       "question": "if invocation #57 of 80 fails, what happens to the 56 before it?",

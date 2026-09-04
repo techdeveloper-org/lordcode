@@ -41,11 +41,19 @@
     "citation": "agent-routing-dispatch-policy-core M5",
     "stability_condition": "rho = lambda / (c*mu) < 1  <=>  c > lambda/mu",
     "worked_example": {
-      "provisional_lambda_peak_arrivals_per_sec": 5,
-      "provisional_mu_per_worker": 0.0375,
-      "derivation_of_mu": "reused from harness_control_policy.json:routing_dispatch.daemon_worker_pool_sizing — class_I E[T]=6.67 turns, W=26.7s, mu=1/W",
-      "minimum_stable_pool_c": 134,
-      "erlang_c_note": "P_wait and W_q (Erlang-C) should be computed by site-reliability-engineer (Ops.2) once real lambda/mu are measured; this file supplies the FORMULA and the METHODOLOGY, not a provisioned worker count."
+      "lambda_MEASUREMENT_INPUT_PENDING_OPS2": "lambda (peak arrival rate, invocations/sec) is NOT a provisioned value — it is a measurement input site-reliability-engineer (Ops.2) supplies from real RED-dashboard telemetry once the daemon is under live load. A prior placeholder of lambda=5/s (~18,000 req/h) over-provisioned the pool by ~4.5x relative to a 50-user team's realistic ~50 req/h load; see harness_control_policy.json:corrections.AI-11 for the full record.",
+      "mu_per_worker": 0.0375,
+      "derivation_of_mu": "reused from harness_control_policy.json:routing_dispatch.daemon_worker_pool_sizing — class_I E[T]=6.67 turns, W=26.7s, mu=1/W. This per-worker service-rate derivation does not depend on lambda and remains valid regardless of the measured arrival rate.",
+      "sizing_formula": "c_min > lambda/mu for stability (rho<1); operate at the smallest c with rho = lambda/(c*mu) <= 0.75 (this file's own scale_up_when trigger below).",
+      "illustrative_worked_point_50_user_team_realistic_load_NOT_A_SHIPPED_VALUE": {
+        "lambda_realistic_inv_per_sec": 0.833,
+        "lambda_basis": "50 req/h x 60 invocations/req / 3600 s/h",
+        "c_min_stability": 23,
+        "c_at_rho_0.75_trigger": 30,
+        "P_wait_at_c30": 0.0807,
+        "W_q_at_c30_seconds": 0.276
+      },
+      "erlang_c_note": "P_wait and W_q (Erlang-C) must be recomputed by site-reliability-engineer (Ops.2) once real lambda/mu are measured; this file supplies the FORMULA and the METHODOLOGY. The illustrative point above (c~=30) demonstrates the methodology for a realistic 50-user load and supersedes the previously published c=134, which used the unrealistic lambda=5/s placeholder — but it is still an illustration, not a provisioned worker count."
     },
     "autoscale_trigger_policy": {
       "scale_up_when": "observed rho (5-minute rolling) exceeds 0.75 — leaves headroom before the Erlang-C wait probability inflects sharply near rho=1 (M5: 'W_q falls super-linearly once rho drops well below 1', which cuts both ways — it also RISES sharply as rho approaches 1).",

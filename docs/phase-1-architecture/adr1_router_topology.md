@@ -1,8 +1,8 @@
 # ADR-1 — Multi-Provider Router Topology
 
-**Status:** PROPOSED (Phase 1 decision — per `docs/orchestration_prompt.md` ADR-1 register, "OPEN, Phase 1 decides")
+**Status:** PROPOSED (Phase 1 decision — per `docs/orchestration_prompt.md` ADR-1 register, "OPEN, Phase 1 decides"); topology **adopted by HLD §7.3 with four seam amendments**; this document last amended by a **Corrections pass (2026-09-04)** addressing HLD `AI-10b` and `AI-4` — see `## Corrections (2026-09-04)` — the topology decision itself (§3) was not reopened
 **Author:** multi-model-router-architect
-**Date:** 2026-09-04
+**Date:** 2026-09-04 (original); corrections 2026-09-04
 **Consumers:** solution-architect (HLD integration), harness-engineering-architect (Alignment 1 handoff), go-systems-engineer (implementation), genai-routing-mathematician (math validation — delegated derivations below), security-lead-auditor (Phase F review of credential/circuit-breaker design)
 **Depends on / must not contradict:** ADR-2 (Go, RESOLVED), ADR-3 (compiled corpus, RESOLVED), PRD.md §5.2 (FR-RTG-001…007), §5.8 (FR-AUT-001…007), §5.4 FR-SDL-005, Team Alignment 1 and 7 (`docs/orchestration_prompt.md` STEP 10.5)
 
@@ -42,7 +42,16 @@ E[cost_cascade] < c_expensive
 ⟺ c_cheap / c_expensive < q_cheap
 ```
 
-`docs/orchestration_prompt.md`'s own ADR-1 register cites the worked illustrative ratio: **at a price ratio of 0.067, cascade is profitable whenever the cheap tier's acceptance rate q₁ exceeds 6.7%.** This is the only concrete break-even number this ADR asserts, because it is sourced directly from the orchestration prompt rather than invented here. **This ADR does not fabricate current 2026 per-token pricing for OpenAI/Anthropic/Gemini tiers** — Phase 0.2's `technology-scout-analyst` R&D pass has not yet verified current pricing tables for all three providers with PRIMARY sources (the same discipline `research_synthesis_round2.md` enforces for every other unverified claim in this project — no grade above what the evidence supports). **Delegated to genai-routing-mathematician:** recompute the exact break-even ratio and `q_cheap` threshold per real provider/tier pairing once `technology-scout-analyst` supplies verified 2026 pricing; this ADR's qualitative conclusion (cascade is favorable whenever the cheap tier clears single-digit-percent acceptance, which is realistic for the majority of LordCode's routine specialist invocations — documentation formatting, boilerplate scaffolding, style-only fixes) does not depend on the exact figure.
+**Corrected 2026-09-04 — see `## Corrections (2026-09-04)` below (AI-10b).** `multi-model-routing-core` §2.1's **0.067 → 6.7%** figure is that skill's own **illustrative worked example**, built on a hypothetical price ratio — it was never LordCode's figure, and this ADR previously cited it as if it were the applicable break-even without a LordCode-specific recomputation. **LordCode's actual break-even, delegated to and computed by genai-routing-mathematician** against verified 2026 provider pricing (`provider_catalogue.md` §1.1, §8.6), using the same M3 formula with real per-attempt costs, is:
+
+```
+OpenAI nano → gpt-5.5           (same-provider) :  q₁ > c₁/c₂ = 0.001100/0.165000 = 0.667%
+Gemini Flash-Lite → Anthropic Opus 5 (cross-provider): q₁ > c₁/c₂ = 0.001900/0.150000 = 1.267%
+```
+
+**LordCode's real break-even range is 0.67%–1.27%, roughly an order of magnitude below the skill's illustrative 6.7%, not the same figure.** Against the assumed Tier-A actual acceptance rate `s_A = 0.95` (`provider_catalogue.md` §6), the per-pairing safety margin is `s_A/q₁`: ≈142.5× for the same-provider pairing (0.95/0.00667) and **≈75.0× for the cross-provider pairing** (0.95/0.01267). **The correct headline figure is ~70–75×** — the conservative, worse-case (smaller-margin) pairing, not a blend of the two (a blend would read ~109×, which overstates robustness for the weaker pairing) and not the same-provider pairing's larger 142×. This is a genuine strengthening versus the illustrative 6.7% figure's implied ~14× margin (0.95/0.067), not the ~20× this ADR previously estimated. **Verified by genai-routing-mathematician** via independent recomputation against the published inputs, cross-checked against `HLD.md` §11.8's separately-derived (by `mathematics-engineer`) identical 0.667%/1.267% result — no new pricing or token counts were introduced in this correction.
+
+**Dependency this figure inherits, stated rather than hidden:** both `c₁` and `c₂` above are computed from `provider_catalogue.md` §6's token-shape assumptions (T_in/T_out per tier), and those assumptions are the subject of an unresolved **BLOCKER**-severity disagreement (HLD `AI-9`, owned by `llm-cost-optimizer`): `cost_model.md` and `harness_control_policy.json` disagree by **5.53×** on tokens per invocation (9,250 vs 51,157). Because `c_raw = T_in·p_in + T_out·p_out` is linear-homogeneous in token count, **the break-even ratio `q₁ = c_cheap/c_expensive` is scale-invariant under a uniform token-count rescaling** — if AI-9 resolves to a single factor applied identically to Tier A and Tier C alike, the 0.67%–1.27% range does not move, only the absolute dollar figures (C_A, C_B, and the CPST table) do, by 5.53×. **This invariance is conditional, not unconditional:** if AI-9 instead resolves to a tier-differential correction (a real possibility current sources do not rule out either way), `q₁` would move. The 0.67%–1.27% range should therefore be read as *likely* robust to AI-9, not *settled* until AI-9 resolves and that conditional is confirmed.
 
 Cascade's other decisive property for LordCode specifically: it needs **no training data and no exploration budget** to be correct on day one, because its ranking is driven by the already-compiled, already-verified DNA capability vectors (model-capability-profiling-core §4) plus live cost/latency/health signals — not by learned parameters.
 
@@ -118,6 +127,28 @@ Per multi-model-routing-core §5.1/§5.2, the correct confidence signal depends 
 
 Per model-capability-profiling-core §7 M5 Step 4 and this ADR's persona-level hard floor: `θ_min = 0.60` is enforced as a **pre-filter, not a soft ranking signal**. Before the cascade ranking step (§3.2) ever runs, every candidate `m` with `S_cap(m,t) = cos(DNA_m, R_t) < 0.60` is removed from the candidate set entirely. This is deliberately a hard cut, not a weighted penalty inside `S(m,t)` — model-capability-profiling-core §6.3 states the reason directly: "θ_min prevents routing to a very cheap model that doesn't meet minimum capability requirements," and §9's anti-pattern list warns against "selecting the argmax model without enforcing the minimum-compatibility floor," where a cheap model's cost-adjusted score can win purely on price even below the capability floor. If the θ_min filter empties the candidate set (every configured provider's every model falls below 0.60 for this task's requirement vector), that is one of the two legitimate hard-failure conditions in §8.
 
+### 4.4 PROVISIONAL Propagation Rule — cold-start TOPSIS ranking (AI-4)
+
+**Corrected/added 2026-09-04 — see `## Corrections (2026-09-04)` below (AI-4).** Per §9's own guidance ("use TOPSIS as the default/cold-start ordering when per-task DNA data is thin; defer to ADR-1's live composite score once real per-task-class quality telemetry exists"), the router falls back to `provider_catalogue.md` §5's TOPSIS-derived provider ranking whenever a per-invocation DNA composite score is unavailable or too thin to trust alone. That ranking is explicitly labeled **PROVISIONAL** at its source: two of its three Tier-B Quality inputs (OpenAI's and Google's) are **low-confidence extrapolations** — derived by applying an assumed, vendor-unconfirmed mini-vs-flagship benchmark gap to each provider's only measured sibling model, not from a direct measurement of the Tier-B model itself (`provider_catalogue.md` §5, §8.3, §8.7).
+
+**Binding rule: the PROVISIONAL label is a property of the ranking, not of the document it first appears in, and it must travel with the ranking into every surface that ranking reaches.** It must not be silently dropped the moment the ranking crosses from `provider_catalogue.md` into router configuration or into a rendered user-facing explanation — a provisional estimate that arrives at the user looking like a settled fact is the exact failure mode this rule exists to prevent. Concretely:
+
+1. **Router cold-start configuration.** Wherever the compiled router config embeds `provider_catalogue.md` §5's TOPSIS ordering as a default/cold-start preference (§9's use), the config entry carries a `confidence: "PROVISIONAL"` field alongside it, not just the ranking itself. `buildgen` (per HLD §3.2/§10.4's compile-time discipline) must refuse to compile that ordering into the corpus without the accompanying confidence tag — this is the same "no field silently dropped at a compile boundary" discipline ADR-3/HLD §10.4 already applies elsewhere.
+2. **The router → harness handoff record (§7).** When a routing decision's `ranked_candidates` were produced (in whole or in part) by falling back to the TOPSIS cold-start ordering rather than a fully-evaluated per-invocation DNA composite score, the record adds a field — `"cold_start_basis"` — recording that fact and its confidence, so the decision is not silently indistinguishable from a fully-measured DNA-ranked decision on replay (FR-HRN-001). Shape:
+   ```jsonc
+   "cold_start_basis": {
+     "used": true,
+     "source": "provider_catalogue.md §5 TOPSIS (Tier B representative)",
+     "confidence": "PROVISIONAL",
+     "reason": "2 of 3 Quality inputs are low-confidence extrapolations pending B.10 measured paired data"
+   }
+   ```
+   This is proposed here as a further, fifth amendment to the SEAM 1 schema HLD §7.3 already amended (A–D) — `solution-architect` should fold it in alongside those, since HLD's schema is the currently-binding version of this record and this ADR must not silently diverge from it.
+3. **Any user-facing "why this model was chosen" explanation** (the `termui` (C14) surface consuming the handoff record, per HLD §9.1/§9.2) must render `cold_start_basis.confidence` as a visible caveat whenever it is present — e.g. *"Model choice uses a provisional quality ranking; two of three provider quality scores are estimated, not directly measured."* — not merely log it. A confidence field that exists in the data model but never reaches the rendered explanation does not satisfy this rule.
+4. **Expiry condition, not a permanent tag.** The PROVISIONAL label must not be dropped until work item **B.10**'s independent eval harness (`llm-benchmark-analyst`, per `provider_catalogue.md` §1.3/§5/§8.7 and HLD §15) supplies measured, paired Tier-B quality data replacing the two extrapolated Quality inputs. At that point `genai-procurement-analyst` re-runs TOPSIS with measured inputs, and only that re-run — not a schedule, not a version bump — clears the tag.
+
+This rule does not change §3's ranking procedure or §9's cold-start use of TOPSIS; it specifies the **propagation contract** for the confidence already attached to that ranking at its source, closing the gap where a provisional estimate could otherwise surface to a user looking indistinguishable from a measured one.
+
 ---
 
 ## 5. Per-Provider (and Per-Model-Tier) Circuit Breakers
@@ -138,6 +169,8 @@ Window type: **time-based, not count-based** (api-orchestration-stack-core §3.2
 **Why one global breaker is wrong here, stated explicitly (task requirement):** LordCode's entire multi-provider value proposition (FR-RTG-002: "a user with only one of the three providers configured shall receive a fully working tool") depends on one provider's degradation *never* blocking routing to the user's other configured, healthy providers. A single global breaker would trip on the *aggregate* failure rate across all configured providers — meaning a single struggling provider drags down routing decisions for invocations that were never going to touch it, and a healthy provider becomes unreachable because an unrelated provider is failing. Per-provider (per-tier) breakers are precisely what preserves FR-RTG-002 and FR-RTG-004's "one provider's outage does not block routing to the user's other configured providers" under load. `api-orchestration-stack-core`'s own reference implementation (§3.3) is structured exactly this way — a `ProviderPool` holding one `CircuitBreaker` instance per provider — and this ADR adopts that pattern directly, extended to per-tier granularity for the reason above.
 
 **Steady-state math, delegated correctly:** the Markov steady-state `P(OPEN) = μ_CO / (μ_CO + μ_OC)` (api-orchestration-stack-core §10 M2) is available to compute expected time-in-OPEN for capacity/UX planning (e.g., "how often will a user with only OpenAI configured see fallback-exhausted errors if OpenAI's failure rate sits at 60% for an extended period"). **This ADR does not compute LordCode-specific `μ_CO`/`μ_OC` values** — those depend on real per-provider failure-rate distributions this project has not yet measured. Delegated to genai-routing-mathematician once `technology-scout-analyst` / production telemetry supplies real failure-rate data.
+
+**Note, reflecting but not owning HLD `AI-12` (§11.4):** per-provider breakers preserving one provider's health from another's failure (above) is an **isolation** property, not an **availability-scales-with-provider-count** claim, and this ADR does not make the latter claim — but it is flagged here explicitly so no downstream reader conflates the two. `solution-architect`'s HLD §11.4 derives, via the correlated common-mode `β`-factor model, that multi-provider redundancy has a hard ceiling of **≈99.95%** availability, not 99.999...%: connecting a **second** provider is worth a real ≈3.3 hours/month of avoided downtime, but a **third** is worth only **≈1 minute/month**. This ADR's circuit-breaker design is correct independent of that ceiling — breakers isolate a degraded provider's *failures* from a healthy one regardless of how many providers are configured — but neither this ADR nor any surface built on it (product copy, README, `termui` messaging) should imply that configuring a third provider materially improves availability. That claim belongs to, and is fully specified by, HLD §11.4 and `AI-12` (owner: `product-manager-agent`, Phase 3 UX) — not re-derived here.
 
 **Non-retryable vs retryable errors** (api-orchestration-stack-core §2.1, §3.3): a 400/401/403/404/422 from a provider is **not** a circuit-breaker-relevant failure and must not be retried as-is or trigger a breaker trip — those indicate a malformed request or bad credential (the exact FR-AUT-006/007 case: a consumer-subscription token presented as an API credential), and the correct response is the FR-AUT-007 precise error message, not provider fallback. Only 429/503/504/timeout-class errors count toward the failure-rate window.
 
@@ -190,6 +223,12 @@ Per Alignment 1 ("the router produces a model+provider selection PER TASK... sol
     "ranked_candidates": [
       {"model": "google/gemini-*", "S_cap": 0.71, "S_cost": 0.55, "S_lat": 0.60, "S_composite": 0.65, "weights_used": {"alpha": 0.5, "beta": 0.1, "gamma": 0.4}}
     ],
+    "cold_start_basis": {
+      "used": false,
+      "source": null,
+      "confidence": null,
+      "reason": null
+    },
     "selected": {"provider": "google", "model": "gemini-*"},
     "substitution": {
       "occurred": true,
@@ -280,7 +319,7 @@ The candidate topology is blocked from full production traffic until the SPRT st
 **What it costs, stated honestly, per this project's own discipline of naming tradeoffs rather than hiding them:**
 - No online learning in v1 — if a provider's real-world quality for a given task class diverges from its compiled DNA vector (model updates on the provider side, which LordCode cannot detect since the corpus is frozen per NEW-1 and DNA vectors are not live-refreshed), the cascade will not self-correct until a human updates the weights or v2's bandit layer (§2.3) ships. This is a genuine limitation, recorded rather than hidden.
 - The per-task-class `τ*` threshold table (§4.1) starts from expert-elicited priors, not fitted empirical calibration data, because no usage history exists yet — genai-routing-mathematician must revisit this once real (confidence, outcome) pairs accumulate.
-- Effective-context reference values (§6) and per-provider pricing (§3.1) are both explicitly unverified in this ADR pending `technology-scout-analyst`'s Phase 0.2 R&D pass — this ADR's structure is correct independent of those exact numbers, but the numbers themselves are not asserted here.
+- Effective-context reference values (§6) remain explicitly unverified pending `technology-scout-analyst`'s Phase 0.2 R&D pass. **Per-provider pricing (§3.1) is no longer unverified as of this Correction pass** — `provider_catalogue.md` §1.1 has since supplied PRIMARY-sourced 2026-09-04 pricing, which §2.1's corrected break-even figures now use directly — but that pricing still feeds into token-count-dependent figures (CPST, absolute cascade cost) that remain exposed to the unresolved AI-9 token-shape dispute (§2.1).
 
 **Explicit non-goal for this ADR:** this document does not select or design the v2 bandit warm-start layer, does not compute final numeric `τ*`/`C_loss`/`C_esc` values, and does not verify current provider pricing or effective-context tables — all three are named, scoped delegations in the sections above, not omissions.
 
@@ -292,11 +331,24 @@ All items below were explicitly not self-derived in this ADR, per this agent's b
 
 | Item | Delegated to |
 |---|---|
-| Cascade break-even ratio using LordCode's actual verified 2026 provider pricing | genai-routing-mathematician (pending `technology-scout-analyst` pricing verification) |
+| Cascade break-even ratio using LordCode's actual verified 2026 provider pricing | **RESOLVED 2026-09-04** — genai-routing-mathematician computed 0.67%–1.27% (`provider_catalogue.md` §8.6), independently confirmed against `HLD.md` §11.8; see §2.1 Corrections. Absolute-cost figures downstream of this ratio remain pending AI-9's token-count resolution (`llm-cost-optimizer`). |
 | Expected regret of a LinUCB bandit at LordCode's realistic per-user invocation volume | genai-routing-mathematician |
 | Numeric calibration of `C_loss`, `C_esc`, `R`, and resulting `τ*` per risk class | genai-routing-mathematician (pending shadow-mode/production telemetry) |
 | Circuit-breaker steady-state `P(OPEN)` using real per-provider failure-rate data | genai-routing-mathematician (pending production telemetry) |
 | SPRT `δ`/`σ` calibration and resulting expected sample size for LordCode's quality-differential distribution | genai-routing-mathematician (pending shadow-mode data) |
+| TOPSIS cold-start ranking numeric re-run with measured (not extrapolated) Tier-B Quality inputs | `genai-procurement-analyst` (pending B.10 `llm-benchmark-analyst` eval harness) — until then, PROVISIONAL propagation rule (§4.4) applies |
+
+---
+
+## Corrections (2026-09-04)
+
+Raised by `solution-architect`'s HLD (`docs/phase-1-architecture/HLD.md` §13, Advisory Items) against this ADR during Phase 1 HLD integration. **The topology decision itself (§3) is not reopened by any correction below** — the HLD adopts it with four seam amendments (HLD §7.3) unrelated to these items. Each row states the published value this ADR previously carried, the corrected value, and the cause.
+
+| HLD Item | Section | Published value | Corrected value | Cause |
+|---|---|---|---|---|
+| **AI-10b** (MEDIUM) | §2.1 | Cascade break-even cited as **6.7%** (safety margin ~20×, informally) | Break-even **0.67%–1.27%**, headline safety margin **~70–75×** (conservative cross-provider pairing; up to ~142× for the same-provider pairing) | The 6.7%/0.067 figure is `multi-model-routing-core` §2.1's own **illustrative worked example** on a hypothetical price ratio — it was carried over as if it were LordCode's figure without a LordCode-specific recomputation against verified pricing. `provider_catalogue.md` §8.6 (genai-routing-mathematician) computed the real ratio from verified 2026 pricing; `HLD.md` §11.8 (`mathematics-engineer`) independently re-derived the identical result; this correction pass's genai-routing-mathematician dispatch confirmed both figures and the correct (non-blended, conservative) headline margin by direct recomputation. The qualitative conclusion strengthens, not weakens. |
+| **AI-4** (MEDIUM) | new §4.4 | No propagation rule existed for `provider_catalogue.md` §5's PROVISIONAL TOPSIS ranking once it left that document | New §4.4 binds the PROVISIONAL label to travel into router cold-start config, the router→harness handoff record (new `cold_start_basis` field, §7), and any user-facing model-choice explanation, until B.10 supplies measured paired data | A provisional, extrapolation-based ranking (2 of 3 Tier-B Quality inputs are low-confidence extrapolations per `provider_catalogue.md` §5/§8.3/§8.7) that silently becomes an authoritative-looking product explanation is a real failure mode this ADR had not previously guarded against. |
+| **AI-12** (MEDIUM, reflected not owned) | §5 | No explicit claim was made either way, but per-provider circuit-breaker isolation language (§5) was adjacent enough to an availability-scales-with-providers reading to warrant an explicit disclaimer | New note in §5 clarifies per-provider breaker isolation ≠ availability improving with provider count, and cites HLD §11.4's derived ≈99.95% common-mode ceiling (provider #2 ≈ +3.3 h/month, provider #3 ≈ +1 min/month) | HLD §11.4/AI-12 derives this ceiling; this ADR does not own or re-derive it, but must not let its circuit-breaker design be misread as implying unbounded availability gains from adding providers. |
 
 ---
 
@@ -309,6 +361,6 @@ AGENT OUTPUT
   Stack:         DNA-ranked rule-based cascade + confidence-gated escalation + per-(provider,tier) circuit breakers
   India Context: DPDP-relevant (per-user credential/context isolation feeds daemon design); Indic 0.5x effective-context correction applied at routing layer for Indic-script source content
   Deliverables:  Router topology decision + quantified 4-way tradeoff table, confidence-gate design (θ derivation + θ_min enforcement), per-provider circuit breaker spec, effective-context-aware filtering, router→harness handoff schema (Alignment 1), partial-account routing behaviour (PRD FR-RTG-005 consistency), SPRT shadow-mode rollout plan
-  Status:        DRAFT — PROPOSED, pending solution-architect HLD integration and consensus-agent BINARY gate
-  Next:          handoff to solution-architect (HLD integration, Alignment 1/7 seam confirmation) and harness-engineering-architect (handoff schema consumption per §7)
+  Status:        PROPOSED — topology ADOPTED by HLD §7.3 (four seam amendments, unaffected by this pass); this Corrections pass (2026-09-04) resolves HLD AI-10b (break-even number) and AI-4 (PROVISIONAL propagation), reflects AI-12 without owning it; pending consensus-agent BINARY gate
+  Next:          solution-architect to fold new §7 `cold_start_basis` field into HLD §7.3's schema as a proposed fifth amendment; genai-procurement-analyst / llm-benchmark-analyst to clear the §4.4 PROVISIONAL tag via B.10; llm-cost-optimizer's AI-9 resolution to confirm §2.1's break-even scale-invariance conditional
 ```
