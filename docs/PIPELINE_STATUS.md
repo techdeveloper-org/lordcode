@@ -4,7 +4,7 @@ Live execution tracker for the plan in [`orchestration_prompt.md`](orchestration
 Updated as each phase completes. This is the file to read to know where things stand.
 
 **Last updated:** 2026-09-04
-**Current phase:** Phase 0 COMPLETE
+**Current phase:** Phase 0 + 0.3 R&D COMPLETE
 **Blocking on:** ** STOP 1 ** — user review of PRD.md + licence decision
 
 ---
@@ -64,7 +64,29 @@ Ops.1 GO/NO-GO. A REJECT at any of these triggers the SC.1–SC.3 self-correctio
 | 0.1b | Positioning, Kano MVP cut, North Star metric, competitive read, README narrative, Apache-2.0 licence recommendation | `product-manager-agent` | 5 | ✅ |
 | 0.2 | Provider auth terms verified, Go SDK parity, Node SEA, competitor scan | `technology-scout-analyst` | 4 | ✅ |
 | — | merge PM sections into `PRD.md` | — | — | ✅ 806 lines, 0 placeholders |
-| — | **STOP 1** — user reviews `PRD.md`, decides licence | *human* | — | ⏸️ **AWAITING YOU** |
+
+### Phase 0.3 — R&D gap-closure chain
+
+Phase 0.2 self-flagged three findings it could not verify. Per the orchestration
+prompt's STEP 0.05 task-routing table, systematic research routes through a
+three-agent chain rather than a single scout, run **sequentially** (plan → retrieve
+→ synthesize), never in parallel.
+
+| # | Item | Agent | Skills | Status |
+|---|---|---|---|---|
+| 0.3a | Protocol: FINER framing, exact query strings, 3-search budget allocation, CRAAP thresholds, saturation rules | `research-strategist` | 3 | ✅ |
+| 0.3b | Retrieval + CRAAP screening. Used 3/3 searches, ~17 free fetches | `deep-web-researcher` | 3 | ✅ |
+| 0.3c | GRADE levels, gap taxonomy, contradiction report, decision brief | `research-synthesis-analyst` | 4 | ✅ |
+
+**Gaps being closed** (all three self-flagged by `technology-scout-analyst`, not invented here):
+
+| Gap | Why it matters | Prior state |
+|---|---|---|
+| OpenAI "Sign in with ChatGPT" OAuth | If open, materially better onboarding | **STILL OPEN** — GRADE VERY LOW. Docs silent by omission (Empirical gap) + one dead link (Reporting gap) |
+| Google Gemini Go SDK | Sizes the Gemini adapter cost | **CLOSED** — all 3 features GRADE HIGH via godoc + dated CHANGELOG. Reverses the scout's "largest gap" |
+| Prior art: pre-built specialist-agent corpus | LordCode's PRIMARY differentiator | **PARTIALLY OPEN** — GRADE VERY LOW (capped). 2 candidates resolved as community marketplaces; 2 stronger leads unfetchable (413/403) = Reporting gap |
+
+| — | **STOP 1** — user reviews `PRD.md` + R&D findings, decides licence | *human* | — | ⏸️ **AWAITING YOU** |
 
 **Phase 0 outputs:** `docs/phase-0-requirements/PRD.md`, `docs/phase-0-requirements/tech_scout_report.md`
 
