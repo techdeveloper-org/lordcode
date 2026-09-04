@@ -4,8 +4,34 @@ Live execution tracker for the plan in [`orchestration_prompt.md`](orchestration
 Updated as each phase completes. This is the file to read to know where things stand.
 
 **Last updated:** 2026-09-04
-**Current phase:** Phase 0 — BA/PM + R&D pre-processing
-**Blocking on:** nothing — Phase 0 agents dispatched
+**Current phase:** Phase 0 COMPLETE
+**Blocking on:** ** STOP 1 ** — user review of PRD.md + licence decision
+
+---
+
+## Breakpoint protocol — where execution STOPS for human review
+
+Execution halts at every ⏸️ below and does not resume until you say so. No stop is
+skipped, auto-approved, or inferred from silence. At each one you get: what was produced,
+what decision is being asked of you, and what unblocks if you approve.
+
+| # | Breakpoint | You review | You decide |
+|---|---|---|---|
+| **STOP 1** | After Phase 0 | `PRD.md`, `tech_scout_report.md` | Licence + governance; whether FR/NFR scope is right |
+| **STOP 2** | Phase 1 — ADR resolution | ADR-1/3/4/5/7 proposals | Router topology, corpus storage form, credential mechanism, distribution, SDLC-engine shape |
+| **STOP 3** | Phase 1 — HLD draft | `HLD.md` | Architecture accepted before the consensus gate runs |
+| **STOP 4** | Phase 3 — design | `terminal_ux_spec.md` | Terminal UX and accessibility |
+| **STOP 5** | Phase 5 — SRS | `SRS.md` + UML | Documentation baseline |
+| **STOP 6** | Phase 6 — sprint | `sprint_verdict.json` | Sprint 1 contents, Jira vs local backlog |
+| **STOP 7** | Phase 7 — routing | `implementation_execution_plan.json` | Per-story agent assignments before any code |
+| **STOP 8** | Phase 8 — alignment | `ir5_alignment_verdict.json` | Final go-ahead into implementation |
+| **STOP 9** | Phase G — release | Release artifacts | Publish or hold |
+
+**Automated gates (no human input needed, but reported to you):** `consensus-agent` BINARY
+APPROVED/REJECTED · Phase C `NLI = FactScore = 1.0` · Phase D `coverage = 100%, DRE = 1.0` ·
+Phase H zero regressions · Phase F all severity counts = 0 · Phase E `RS = 1.0` ·
+Ops.1 GO/NO-GO. A REJECT at any of these triggers the SC.1–SC.3 self-correction loop
+(max 3 iterations) and then escalates to you rather than looping forever.
 
 ---
 
@@ -28,16 +54,17 @@ Updated as each phase completes. This is the file to read to know where things s
 | P.1 | Orchestration plan | `prompt-generation-expert` | ✅ `docs/orchestration_prompt.md` |
 | P.2 | README / CHANGELOG / VERSION | — | ✅ committed `2e684a2` |
 | P.3 | `.gitignore` | — | ✅ |
-| P.4 | Repo pushed to remote | — | 🔄 |
+| P.4 | Repo pushed to remote | — | ✅ `master` on origin |
 
 ## Phase 0 — Requirements & R&D → PRD
 
 | # | Item | Agent | Skills | Status |
 |---|---|---|---|---|
-| 0.1a | FR/NFR entries + RTM skeleton + Given/When/Then ACs | `business-analyst-agent` | 5 | 🔄 |
-| 0.1b | Positioning, MVP cut, North Star metric, README narrative, licence + governance recommendation | `product-manager-agent` | 5 | 🔄 |
-| 0.2 | Provider auth terms (subscription vs API), Go SDK parity, competitor scan | `technology-scout-analyst` | 4 | 🔄 |
-| — | **STOP 1** — user reviews `PRD.md`, decides licence | *human* | — | ⏸️ |
+| 0.1a | 48 FRs + 14 NFRs, all quote-traced; Given/When/Then ACs; RTM skeleton; DPDP FRs; capability-gap register | `business-analyst-agent` | 5 | ✅ |
+| 0.1b | Positioning, Kano MVP cut, North Star metric, competitive read, README narrative, Apache-2.0 licence recommendation | `product-manager-agent` | 5 | ✅ |
+| 0.2 | Provider auth terms verified, Go SDK parity, Node SEA, competitor scan | `technology-scout-analyst` | 4 | ✅ |
+| — | merge PM sections into `PRD.md` | — | — | ✅ 806 lines, 0 placeholders |
+| — | **STOP 1** — user reviews `PRD.md`, decides licence | *human* | — | ⏸️ **AWAITING YOU** |
 
 **Phase 0 outputs:** `docs/phase-0-requirements/PRD.md`, `docs/phase-0-requirements/tech_scout_report.md`
 
