@@ -1,0 +1,68 @@
+{
+  "artifact": "resource_elastic_policy.json",
+  "generated_by": "harness-engineering-architect",
+  "phase": "A.6.1 (Resource-Elastic Orchestration)",
+  "status": "DRAFT",
+  "scope_note": "product_design ONLY. This artifact governs LordCode's own daemon/harness at runtime — provider-fallback model-switching and daemon worker-pool elasticity. It has no build-pipeline counterpart (this pipeline itself is single-tenant and does not elastically scale workers).",
+  "seam_reminder": "per Alignment 7 (orchestration_prompt.md STEP 10.5 pair 7), this file governs HOW EXECUTION ADAPTS once the router (D23, WHICH MODEL) and the SDLC engine (D39, WHICH AGENTS) have already made their orthogonal selections. Nothing here re-decides which agents run or overrides genai-routing-mathematician's regret-bound derivations for the router's own topology (ADR-1) — this is the harness's consumption of a circuit-breaker-triggered fallback (Alignment 1) and the daemon's own capacity elasticity, both of which are D50 (harness) territory, not D23.",
+
+  "math_delegation": {
+    "owner": "harness-mathematics-expert (opus, Domain 50) for the loop-execution/queueing math; genai-routing-mathematician (Domain 23) remains sole owner of WHICH-MODEL regret-bound derivations per Alignment 2 — not duplicated here.",
+    "consumed_results": [
+      "agent-routing-dispatch-policy-core M6: contextual-bandit regret Regret(T) = O(sqrt(K*T*log T)); average regret -> 0; regret grows with sqrt(K); a correct deterministic table has zero regret, a learned router pays sqrt(K*T*log T) while exploring",
+      "agent-routing-dispatch-policy-core M5: M/M/c stability rho = lambda/(c*mu) < 1, Erlang-C P_wait, W_q = C(c,a)/(c*mu - lambda)",
+      "agent-loop-lifecycle-core M3: L = lambda * E[T] * (l_LLM + l_tool)",
+      "retry-backoff-circuit-breaker-core M4: P(OPEN) = tau / (s/lambda_trip + tau + 1/mu_probe)"
+    ]
+  },
+
+  "provider_fallback_bandit": {
+    "purpose": "when the harness's own per-provider circuit breaker (harness_control_policy.json:circuit_breaker_policy) trips OPEN for the provider currently serving an invocation, THIS policy governs how the harness's fallback REQUEST is scored before handing it to the router for the actual argmax re-route (Alignment 1: harness triggers, router decides).",
+    "algorithm": "LinUCB contextual bandit",
+    "citation": "agent-routing-dispatch-policy-core M6 (contextual-bandit regret) + M1 (argmax scoring unifies deterministic and learned routing as one family)",
+    "why_bandit_not_static_table": "provider health/latency/cost drift over time (rate limits change, a provider degrades mid-incident) — M6's own closing comparison states a learned router is preferred exactly when 'the task distribution is unforeseeable and shifting', which describes live multi-provider failover; a static fallback-priority table would accumulate the linear, non-vanishing regret M6 warns about once any provider's true rank shifts.",
+    "K_candidate_providers": 3,
+    "context_features_per_arm": [
+      "rolling per-provider success rate over the circuit breaker's own N=20 window",
+      "P50/P90 latency over the last 5 minutes",
+      "cost per successful invocation (input+output token price at current rates)",
+      "capability-DNA fit score for the failing invocation's task class (read from the router's own capability model, D23 — consumed, not recomputed here)",
+      "current circuit-breaker state of each candidate provider (CLOSED preferred; HALF-OPEN admitted only as a last resort probe)"
+    ],
+    "regret_bound": "O(sqrt(K*T*log T))",
+    "interpretation_for_lordcode": "K=3 is small by construction (agent-routing-dispatch-policy-core M6: 'regret grows with sqrt(K) ... keep A small and well-differentiated') — LordCode's provider set is exactly the well-differentiated, small-K regime the bandit approach is favourable in, unlike a router choosing among dozens of candidate specialist agents (that selection stays with the SDLC engine's DAG-based dispatch, never a bandit).",
+    "cold_start_policy": "before enough fallback events have accumulated to fit LinUCB's per-arm confidence bounds, fall back to the router's own static capability-DNA ranking (score_det, the degenerate indicator scorer of M1) — never block a real user's failing invocation waiting for bandit convergence.",
+    "never_do": "never let this bandit re-route an invocation that has NOT experienced a circuit-breaker trip — Alignment 1 is explicit that a routing decision is final for that task's execution absent an explicit trigger; this bandit only activates ON a harness-triggered fallback event."
+  },
+
+  "daemon_elastic_scaling": {
+    "purpose": "size and elastically adjust the daemon's agent-loop worker pool as multi-tenant load (concurrent users, concurrent requirements) varies, so ACs like AC-FR-HRN-003 (T_max enforced regardless of remaining budget) hold even under load spikes rather than degrading into unbounded queueing.",
+    "queueing_model": "M/M/c",
+    "citation": "agent-routing-dispatch-policy-core M5",
+    "stability_condition": "rho = lambda / (c*mu) < 1  <=>  c > lambda/mu",
+    "worked_example": {
+      "provisional_lambda_peak_arrivals_per_sec": 5,
+      "provisional_mu_per_worker": 0.0375,
+      "derivation_of_mu": "reused from harness_control_policy.json:routing_dispatch.daemon_worker_pool_sizing — class_I E[T]=6.67 turns, W=26.7s, mu=1/W",
+      "minimum_stable_pool_c": 134,
+      "erlang_c_note": "P_wait and W_q (Erlang-C) should be computed by site-reliability-engineer (Ops.2) once real lambda/mu are measured; this file supplies the FORMULA and the METHODOLOGY, not a provisioned worker count."
+    },
+    "autoscale_trigger_policy": {
+      "scale_up_when": "observed rho (5-minute rolling) exceeds 0.75 — leaves headroom before the Erlang-C wait probability inflects sharply near rho=1 (M5: 'W_q falls super-linearly once rho drops well below 1', which cuts both ways — it also RISES sharply as rho approaches 1).",
+      "scale_down_when": "observed rho (30-minute rolling, to avoid flapping) stays below 0.40",
+      "hard_floor": "c never scales below the minimum stable pool for the CURRENT measured lambda/mu (rho < 1 is non-negotiable — an under-provisioned pool does not lose correctness, it loses latency without bound, per M5)."
+    },
+    "isolation_note": "each worker in the pool serves ONE agent-loop invocation under its own T_max/B stop predicate (harness_control_policy.json) and its own per-user context isolation (DPDP Act 2023 Section 4, ADR-6) — elastic scaling changes WORKER COUNT, never the per-invocation stop-predicate parameters, which stay fixed per invocation class regardless of load."
+  },
+
+  "circuit_breaker_triggered_reroute_flow": {
+    "steps": [
+      "1. harness's per-provider breaker for provider P trips OPEN (harness_control_policy.json:circuit_breaker_policy trip_rule).",
+      "2. harness emits a fallback-request event: {failing_invocation_id, task_class, provider_P_state=OPEN, remaining_budget, remaining_T_max}.",
+      "3. provider_fallback_bandit (this file) scores the remaining CLOSED-breaker configured providers using its context features.",
+      "4. the router (D23, external to the harness) performs the actual argmax re-route using the bandit's scores as one input among its own capability-DNA/cost model, per Alignment 1 — the harness does not unilaterally pick the replacement provider, it requests one.",
+      "5. the invocation resumes on the newly-routed provider with its ORIGINAL T_max/B budget continuing from where it left off (not reset) — a fallback is a provider substitution within the same invocation, not a new invocation.",
+      "6. the substitution is recorded in the audit trail per PRD FR-RTG-005 ('record that a substitution occurred and why')."
+    ]
+  }
+}

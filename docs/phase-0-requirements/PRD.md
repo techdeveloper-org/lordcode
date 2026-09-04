@@ -21,7 +21,9 @@
 
 *Authored by `product-manager-agent` (Phase 0.1b), merged 2026-09-04.*
 
-**LordCode is not another AI coding CLI competing on model quality. It is the only one that ships the specialist workforce instead of asking the user to build one.**
+**LordCode is not another AI coding CLI competing on model quality. It ships the specialist workforce instead of asking you to build one.**
+
+> **Evidence note (corrected 2026-09-04 per Phase 0.4 synthesis).** An earlier draft of this line read *"it is the only one that ships the specialist workforce"*. The R&D evidence does not support that absolute. What two rounds of investigation actually established is narrower and defensible: **across a budget-limited, non-exhaustive survey, no comparable vendor-bundled corpus was found — the three independent candidates examined all turned out to be community marketplaces the user installs from, not capability that ships with the tool.** Graded **LOW** confidence, capped by `research_protocol.md` §9 precisely because this project has an interest in the answer. Permitted public wording therefore excludes "novel", "first", "unique", "unmatched", and "the only one". Use the survey framing above instead — it carries the same competitive weight without becoming false the moment someone produces a counter-example.
 
 Two differentiators, stated as testable claims rather than adjectives:
 

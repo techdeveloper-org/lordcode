@@ -1,0 +1,308 @@
+{
+  "artifact": "harness_control_policy.json",
+  "generated_by": "harness-engineering-architect",
+  "phase": "A.6 (Harness Control Setup) — invoked ahead of a formal HLD; HLD.md does not yet exist",
+  "status": "DRAFT",
+  "supersedes_note": "Alignment 6 verdict below is a POSITION for solution-architect to confirm or reject in Phase 1, per agent.md Core Responsibility and ORCHESTRATION_TEMPLATE STEP 10.5 pair 6. Once docs/phase-1-architecture/HLD.md exists, this artifact must be re-read against it and promoted to REVIEWED, then APPROVED after consensus-agent's BINARY gate.",
+  "dual_purpose_note": "This single JSON file governs TWO distinct things, kept separate in every section below via a 'scope' tag: (1) 'build_pipeline' = the LangGraph/orchestration harness executing THIS SDLC pipeline that builds LordCode; (2) 'product_design' = the harness LordCode itself ships to end users. They share the same mathematical machinery (same skills, same formulas) but are configured with different, independently-calibrated numbers because they run different workloads.",
+
+  "math_delegation": {
+    "owner": "harness-mathematics-expert (opus, Domain 50)",
+    "note": "No live math-agent invocation channel exists in this standalone dispatch (only claude/Explore/general-purpose/Plan/statusline-setup agent types are spawnable here). Every number below is a DIRECT APPLICATION of an already-derived, cited skill formula (M1-M6 of the six mandatory skills) — never an improvised derivation. Each result below carries its skill+section citation. Formal re-derivation, confidence intervals, and empirical recalibration from real telemetry remain harness-mathematics-expert's job once that agent is reachable in a live pipeline run.",
+    "consumed_results": [
+      "agent-loop-lifecycle-core M5: E[T]=1/p, T_max >= ln(1/delta)/ln(1/(1-p))",
+      "agent-loop-lifecycle-core M3: L = lambda * E[T] * (l_LLM + l_tool)  (Little's Law, agentic form)",
+      "stop-condition-budget-control-core M1: STOP = g1 v g2 v g3 v g4, latching guards, liveness proof",
+      "stop-condition-budget-control-core M2/M3: Cost_replay(T) = c*T(T+1)/2 = Theta(T^2); theta* ~= rho*T; T_min = sqrt(2*C_s/(rho*c))",
+      "retry-backoff-circuit-breaker-core M1: delay(n) = min(cap, base*b^n), n* = ceil(log_b(cap/base))",
+      "retry-backoff-circuit-breaker-core M2: full jitter delay(n) = U(0,D(n))",
+      "retry-backoff-circuit-breaker-core M3: E[attempts] = (1-p^k)/q",
+      "retry-backoff-circuit-breaker-core M4: P(OPEN) = tau / (s/lambda_trip + tau + 1/mu_probe)",
+      "retry-backoff-circuit-breaker-core M5: binomial false-trip tail, worked at theta=0.5,N=20,r0=0.10 -> P(false trip)~=1.3e-9",
+      "tool-call-mediation-core M4: p* = c_a / (d * L_h)  (HITL expected-loss threshold)",
+      "tool-call-mediation-core M2: P(correct) ~= 1/(k+1) for k confusable near-duplicate tools",
+      "agent-routing-dispatch-policy-core M4: parallel iff no directed path in decomposition DAG; Kahn topological sort O(|V|+|E|); critical-path makespan lower bound",
+      "agent-routing-dispatch-policy-core M5: M/M/c stability rho = lambda/(c*mu) < 1, Erlang-C P_wait"
+    ]
+  },
+
+  "loop_lifecycle": {
+    "scope": "both (identical structure; different T_max per class, see stop_predicate.t_max_by_class)",
+    "cycle": "LLM call -> inspect response -> tool dispatch (if any) -> result fed back -> continue-or-stop",
+    "boundary_invariant": "the model owns pi (WHICH action/tool/args to propose or final answer); the harness owns E (validation, dispatch, budgeting, continue-or-stop). The harness never lets the model's own text substitute for a stop or approval decision (tool-call-mediation-core Section 2.3).",
+    "finishReason_taxonomy": {
+      "citation": "agent-loop-lifecycle-core Section 3.2 + stop-condition-budget-control-core Section 2.2, extended with an abort_reason sub-field to satisfy PRD AC-FR-HRN-003",
+      "values": ["stop", "tool-calls", "length", "aborted"],
+      "abort_reason_subfield": {
+        "applies_when": "finishReason == aborted",
+        "values": ["t_max", "budget", "stopWhen", "cancelled"],
+        "rationale": "AC-FR-HRN-003 requires a T_max stop to be logged as distinct from a budget-guard stop. The base 4-value taxonomy collapses both into 'aborted' (stop-condition-budget-control-core Section 2.2 table). abort_reason is the disambiguating field the audit log actually needs; it must never be omitted on an aborted run."
+      },
+      "hard_rule": "an aborted result MUST NEVER be reported as a stop result (agent-loop-lifecycle-core Section 3.3, 'a correctness bug'). The harness recovers only the LAST available response on abort, and the audit trail must say so."
+    },
+    "stop_precedence": {
+      "citation": "stop-condition-budget-control-core Section 2.3",
+      "order": ["isFinal (-> stop)", "stopWhen (-> aborted:stopWhen, or graceful per predicate intent)", "tokens_t >= B (-> aborted:budget)", "t >= T_max (-> aborted:t_max)"],
+      "why_this_order": "a task that completes on its own final allowed turn must be reported as stop, never as an abort just because the turn cap also tripped that same turn."
+    }
+  },
+
+  "stop_predicate": {
+    "scope": "both",
+    "formula": "STOP(s_t, t, tokens_t) = isFinal(a_t) OR (t >= T_max) OR (tokens_t >= B) OR stopWhen(s_t)",
+    "citation": "agent-loop-lifecycle-core M6 + stop-condition-budget-control-core Section 2.1, M1",
+    "liveness_guarantee": "T_max is the ONLY unconditional termination guarantee (M2's monotone-variant proof: t increments by exactly 1 per turn, so t>=T_max fires by turn T_max regardless of model behaviour). isFinal alone gives NO termination guarantee — never rely on the model eventually stopping.",
+    "t_max_sizing_formula": "T_max >= ln(1/delta) / ln(1/(1-p))   [agent-loop-lifecycle-core M5]",
+    "t_max_by_class": {
+      "note": "A single global T_max is an anti-pattern (agent-loop-lifecycle-core Anti-Patterns: 'ignoring the fitted per-turn continuation probability p_c for the specific task class'). LordCode's specialist roster is heterogeneous, so T_max is sized per invocation class from a provisional per-turn stop probability p. ALL p values below are provisional placeholders pending real per-class telemetry from Phase H (>=5 replays); recalibrate before ACTING mode.",
+      "target_hard_exit_rate_delta": 0.01,
+      "class_R_advisory_docs": {
+        "examples": "business-analyst-agent, product-manager-agent, solution-architect (document-producing turns), reviewers",
+        "provisional_p": 0.30,
+        "derivation": "T_max >= ln(1/0.01)/ln(1/0.70) = 4.6052/0.3567 = 12.91 -> rounded up with margin",
+        "T_max": 15
+      },
+      "class_I_implementation": {
+        "examples": "go-systems-engineer, database-engineer, devops-engineer — write/build/test loops",
+        "provisional_p": 0.15,
+        "derivation": "T_max >= ln(1/0.01)/ln(1/0.85) = 4.6052/0.1625 = 28.34 -> rounded up with margin",
+        "T_max": 30
+      },
+      "class_S_security_qa_scan": {
+        "examples": "sast-engineer, penetration-tester, chaos-engineering-specialist, performance-testing-engineer",
+        "provisional_p": 0.10,
+        "derivation": "T_max >= ln(1/0.01)/ln(1/0.90) = 4.6052/0.1054 = 43.70 -> rounded up with margin",
+        "T_max": 45
+      }
+    }
+  },
+
+  "token_budget_control": {
+    "scope": "both",
+    "two_orthogonal_levers": {
+      "citation": "stop-condition-budget-control-core Section 6, M5",
+      "rate_limit": {
+        "mechanism": "token bucket (C, r) per provider connection",
+        "governs": "instantaneous burst (flow axis, dW/dt <= r)",
+        "recovery": "wait for refill — never a hard stop"
+      },
+      "budget_limit": {
+        "mechanism": "cumulative counter vs B, per agent-loop invocation",
+        "governs": "total spend for that invocation (stock axis, W(T) <= B)",
+        "recovery": "none within the invocation — hard stop, finishReason=aborted, abort_reason=budget"
+      },
+      "orthogonality_rule": "both are enforced independently; satisfying one gives no guarantee about the other, especially under multi-provider fan-out where several invocations draw on the same provider's rate-limit headroom simultaneously."
+    },
+    "context_replay_cost_model": {
+      "citation": "stop-condition-budget-control-core M2: Cost_replay(T) = c*T(T+1)/2 = Theta(T^2)",
+      "provisional_c_tokens_per_turn": 2000,
+      "provisional_note": "c=2000 is an illustrative placeholder informed by the 20,000-32,000 token Context Budget fields already used for individual specialist dispatches in docs/orchestration_prompt.md, divided across an assumed multi-turn footprint. MUST be replaced with go-systems-engineer's measured harness telemetry (mean tokens added per turn: one tool-call request + one tool-result) before ACTING mode."
+    },
+    "compaction_policy": {
+      "citation": "stop-condition-budget-control-core Section 4, M3, M6",
+      "provisional_rho_compression_ratio": 0.55,
+      "provisional_C_s_summarization_cost_tokens": 3000,
+      "formula_theta_star": "theta* ~= rho * T_max",
+      "formula_T_min_breakeven": "T_min = sqrt(2*C_s / (rho*c))",
+      "T_min_breakeven_turns": 2.34,
+      "T_min_interpretation": "compaction never pays for itself below ~2.3 remaining turns — do not compact short invocations (class R at T_max=15 still comfortably clears this; all three classes benefit from compaction).",
+      "per_class": {
+        "class_R": { "theta_star_turns": 8, "theta_tok_threshold": 16000 },
+        "class_I": { "theta_star_turns": 17, "theta_tok_threshold": 33000 },
+        "class_S": { "theta_star_turns": 25, "theta_tok_threshold": 50000 }
+      }
+    },
+    "budget_guard_B_per_invocation": {
+      "citation": "stop-condition-budget-control-core M2/M3 (post-compaction total = R_full(theta*) + C_s + R_red(theta*))",
+      "derivation_note": "B is set with headroom above the expected post-compaction total cost per class, computed at the class's own T_max as a worst-case ceiling (most runs stop far earlier at their natural E[T]=1/p, per M5 of agent-loop-lifecycle-core).",
+      "class_R_tokens": 180000,
+      "class_I_tokens": 750000,
+      "class_S_tokens": 1500000,
+      "hard_rule": "B is enforced independent of and in addition to the post-run cost DISPLAY (PRD FR-COR-006) — B is a mandatory stop disjunct, never optional, never user-configurable to 'unlimited' (PRD constraint (d): no spend ceilings/approval prompts is about NOT gating the user's SPEND CHOICE up front; it is not a licence to remove the harness's own runaway-safety invariant)."
+    }
+  },
+
+  "retry_policy": {
+    "scope": "both",
+    "citation": "retry-backoff-circuit-breaker-core Section 1-3, M1-M3",
+    "per_call_cap_k": 3,
+    "retryable_conditions": ["timeout", "connection_reset", "HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504", "provider transient (e.g. Anthropic overloaded_error, OpenAI server_error)"],
+    "non_retryable_conditions": ["HTTP 400 (bad request/args)", "HTTP 401 (auth)", "HTTP 403 (forbidden)", "HTTP 404 (resource absent)", "HTTP 422 (schema validation failure)"],
+    "backoff_schedule": {
+      "formula": "delay(n) = min(cap, base * b^n)",
+      "base_seconds": 1,
+      "growth_factor_b": 2,
+      "cap_seconds": 30,
+      "saturation_round_n_star": 5,
+      "jitter": {
+        "strategy": "full jitter",
+        "formula": "delay(n) = U(0, min(cap, base*b^n))",
+        "rationale": "maximum decorrelation across concurrent invocations hitting the same provider (retry-backoff-circuit-breaker-core M2) — mandatory on every backoff, never a bare deterministic schedule."
+      }
+    },
+    "provisional_transient_failure_rate_p": 0.30,
+    "expected_outcome_at_k3": {
+      "P_success_within_k": 0.973,
+      "E_attempts": 1.39,
+      "citation": "retry-backoff-circuit-breaker-core M3 worked example, reused as LordCode's provisional calibration point"
+    },
+    "retry_budget_whole_invocation": "no more than 10% of an invocation's total tool/provider calls may be retries; a retry consumes a turn-equivalent and is charged against the same T_max/B stop-predicate bound as any other turn (retry-backoff-circuit-breaker-core Section 1.3).",
+    "distinctness_rule": "retry (this section) is NEVER conflated with circuit-breaking (next section) or with SC.1-3 self-correction (see retry_hierarchy)."
+  },
+
+  "circuit_breaker_policy": {
+    "scope": "product_design (per-provider execution breaker) — the build_pipeline uses the SAME structure against whichever provider/model executes each dispatched agent's calls",
+    "citation": "retry-backoff-circuit-breaker-core Section 4, M4, M5",
+    "granularity": "ONE breaker PER CONFIGURED PROVIDER, never a single global breaker (PRD FR-RTG-004, orchestration_prompt.md CONSTRAINTS repeated verbatim). This is the harness's own EXECUTION breaker and is a distinct instance from the router's routing-CONFIDENCE breaker (see distinct_from_router_breaker below) — both exist, for different consumers.",
+    "states": ["CLOSED", "OPEN", "HALF-OPEN"],
+    "trip_rule": {
+      "rolling_window_N": 20,
+      "failure_threshold_theta": 0.5,
+      "false_trip_check": {
+        "assumed_baseline_r0": 0.10,
+        "z_score": 5.96,
+        "P_false_trip": "~1.3e-9",
+        "citation": "retry-backoff-circuit-breaker-core M5 worked example at theta=0.5, N=20, r0=0.10 — directly reused since LordCode's provisional baseline matches the skill's own worked calibration point."
+      }
+    },
+    "cooldown_tau_seconds": 30,
+    "cooldown_backoff": "cooldown itself doubles on consecutive trips, cap 300s (retry-backoff-circuit-breaker-core Section 4.2)",
+    "half_open_probe_count": 1,
+    "duty_cycle_formula": "P(OPEN) = tau / (s/lambda_trip + tau + 1/mu_probe)",
+    "distinct_from_router_breaker": "the multi-model-router-architect's confidence-gate breaker (orchestration_prompt.md line ~272: 50% failure / 60s window / 30s half-open) scores provider HEALTH as an input to the router's argmax model-selection decision (D23, WHICH model). This harness breaker (D50) instead wraps the LIVE call the harness is currently executing for an already-routed invocation. When THIS breaker trips OPEN, the harness does not re-score — it emits the 'explicit circuit-breaker fallback' event named in Alignment 1, and the router re-routes the NEXT invocation via its own argmax over remaining CLOSED-breaker configured providers. The two breakers are configured independently and must not be merged into one.",
+    "fail_fast_rule": "no retries are attempted while a provider's breaker is OPEN — retrying through an open breaker defeats the blast-radius bound (retry-backoff-circuit-breaker-core M6)."
+  },
+
+  "retry_hierarchy": {
+    "scope": "both — this is the seam that resolves Alignment 6, see alignment_6_position below",
+    "tiers": [
+      {
+        "tier": 1,
+        "name": "tool/provider call retry",
+        "owner": "harness (this file, retry_policy)",
+        "scope_of_recovery": "one HTTP/tool call, k<=3 attempts, seconds",
+        "citation": "retry-backoff-circuit-breaker-core"
+      },
+      {
+        "tier": 2,
+        "name": "circuit breaker",
+        "owner": "harness (this file, circuit_breaker_policy)",
+        "scope_of_recovery": "one provider, systemic failure, seconds-to-minutes, fails fast + triggers router fallback",
+        "citation": "retry-backoff-circuit-breaker-core"
+      },
+      {
+        "tier": 3,
+        "name": "SC.1-3 self-correction",
+        "owner": "SDLC pipeline engine (D39), NOT the harness — the harness only supplies the signal (finishReason, abort_reason, retry/breaker counts) that root-cause-analysis-agent consumes",
+        "scope_of_recovery": "one PHASE GATE, <=3 iterations then human escalation, minutes-to-hours",
+        "citation": "docs/orchestration_prompt.md STEP 10 (Phase SC.1-SC.3), PRD FR-SDL-002"
+      }
+    ],
+    "hard_rule": "never conflate tiers. A tier-1 retry exhausting its cap does not by itself constitute an SC.1 event — it surfaces as a tool-result observation the MODEL may react to (tool-call-mediation-core Section 4.3); only a GATE-LEVEL failure (the phase's evaluator returns REJECT/FAIL) triggers SC.1-3."
+  },
+
+  "tool_mediation": {
+    "scope": "both",
+    "citation": "tool-call-mediation-core Section 1-5, M1-M6",
+    "pipeline_stages": ["intercept", "permission/approval gate", "JSON-schema validation", "dispatch", "result injection"],
+    "soundness_invariant": "dispatched set D subset-of V^-1(1) — malformed arguments are rejected before dispatch, never coerced through a permissive schema (M3).",
+    "toolset_size_policy": {
+      "target_tools_per_agent": "3-5, deeply known",
+      "citation": "tool-call-mediation-core Section 5, M2: P(correct) ~= 1/(k+1) for k confusable near-duplicates — empirical <80% accuracy threshold reported near 15-20 tools, flagged as vendor-reported not derived",
+      "mitigation": "decompose into focused sub-agents rather than overload one agent's toolset; already the library's own convention across its 528 compiled agents."
+    },
+    "hitl_approval_threshold": {
+      "formula": "require approval iff p > c_a / (d * L_h)",
+      "citation": "tool-call-mediation-core M4",
+      "applied_to_lordcode_dangerous_actions": [
+        {
+          "action_class": "file deletion outside PROJECT_PATH, or any recursive delete",
+          "policy": "REQUIRE_APPROVAL always",
+          "reasoning": "L_h -> very large (irrecoverable data loss, possible credential-file destruction); p* collapses toward 0 regardless of c_a, d."
+        },
+        {
+          "action_class": "git push to a protected branch (main) or any force-push",
+          "policy": "REQUIRE_APPROVAL always",
+          "reasoning": "L_h high (irreversible history rewrite, possible secret exposure); a single confirmation (low c_a) is cheap relative to the loss."
+        },
+        {
+          "action_class": "git push to a pipeline-created, non-protected feature/scratch branch (normal Phase G operation)",
+          "policy": "ALLOW with audit log",
+          "reasoning": "L_h materially lower — the branch is disposable and protected-branch policy already prevents direct main damage; gating this would add friction to the pipeline's own routine Phase G push-and-PR flow with no proportionate risk reduction (tool-call-mediation-core Anti-Pattern: uniform gating regardless of harm severity)."
+        },
+        {
+          "action_class": "arbitrary network call to a host outside the three configured provider endpoints or the daemon's own declared integrations",
+          "policy": "DENY by default (allowlist-only egress); REQUIRE_APPROVAL to add a host to the allowlist",
+          "reasoning": "SSRF and credential-exfiltration risk are named CRITICAL in the PRD's Security Risk section; L_h includes cross-user credential leakage on the multi-tenant daemon."
+        },
+        {
+          "action_class": "read-only operations (list/read files, git status/diff/log, read-only provider calls)",
+          "policy": "ALLOW, no gate",
+          "reasoning": "L_h near 0; gating every read imposes friction with no risk reduction (p* > 1)."
+        }
+      ]
+    }
+  },
+
+  "routing_dispatch": {
+    "scope": "both",
+    "citation": "agent-routing-dispatch-policy-core Section 1-4, M1, M4, M5",
+    "provider_failover": {
+      "formula": "route(x|context) = argmax_a score(x, a | context)",
+      "score_inputs": ["circuit-breaker state (health)", "recent latency", "recent cost", "capability-DNA fit for the task class"],
+      "trigger": "harness-triggered circuit-breaker fallback (Alignment 1) or a new task — never a mid-execution re-route of an already-dispatched invocation."
+    },
+    "decomposition_dag": {
+      "rule": "two subtasks parallelise iff no directed path connects them in the dependency DAG (M4)",
+      "scheduling": "Kahn's topological sort, O(|V|+|E|), level/antichain waves",
+      "applied_to_lordcode": "docs/orchestration_prompt.md's Phase B.1-B.9 already marks explicit parallel groups (e.g. B.2 || B.3); the SDLC engine (D39) owns this decomposition, the harness executes each resulting node's invocation.",
+      "critical_path_rule": "phase gates (Phase 0->1->1.5->...->Ops.5) are hard sequential barriers; makespan is lower-bounded by the SUM of each phase's own critical path, not reducible by adding daemon workers beyond each phase's own antichain width — see forty_to_eighty_invocation_analysis."
+    },
+    "daemon_worker_pool_sizing": {
+      "citation": "agent-routing-dispatch-policy-core M5 (M/M/c)",
+      "stability_condition": "rho = lambda / (c * mu) < 1  =>  c > lambda / mu",
+      "worked_illustrative_example": {
+        "provisional_lambda_arrivals_per_sec": 5,
+        "derivation_of_mu": "E[T]_class_I = 1/p = 1/0.15 = 6.67 turns; W = E[T]*(l_LLM + l_tool) = 6.67*(3s+1s) = 26.7s; mu = 1/W = 0.0375 invocations/sec/worker",
+        "minimum_stable_pool_c": 134,
+        "note": "lambda and per-turn latencies (l_LLM, l_tool) are PLACEHOLDERS. site-reliability-engineer (Ops.2) must replace with measured RED-dashboard values before this number is used for real capacity planning; this is a sizing METHODOLOGY handoff, not a provisioned value."
+      }
+    }
+  },
+
+  "forty_to_eighty_invocation_analysis": {
+    "scope": "product_design — this is the direct answer to 'what does 40-80+ invocations per requirement do to Little's Law, replay cost, and failure semantics'",
+    "littles_law_across_pipeline": {
+      "claim": "L_pipeline (mean invocations in flight for one requirement) is NOT 40-80 simultaneously — it equals the ANTICHAIN WIDTH at each DAG wave, which the SDLC engine's decomposition already keeps small (e.g. Phase F.2/F.3/F.4 run 2-3 agents in parallel each, not all 40-80 at once). Wall-clock time for one requirement is dominated by the SEQUENTIAL SUM of phase-gate critical paths, not by daemon concurrency — matching agent-routing-dispatch-policy-core M4's critical-path lower bound.",
+      "consequence": "provisioning the daemon for 'one requirement = 80 concurrent workers' over-provisions badly; the correct sizing input is the MAX antichain width across all phases (typically single digits) times the number of CONCURRENT REQUIREMENTS the daemon serves multi-tenant, which is the lambda used in daemon_worker_pool_sizing above."
+    },
+    "context_replay_cost_across_the_whole_run": {
+      "wrong_model": "treating the whole 40-80-invocation run as ONE loop of T=(sum of all invocations' turns) and applying Cost_replay(T)=c*T(T+1)/2 to that combined T — this would be catastrophically over-quadratic and is explicitly the anti-pattern stop-condition-budget-control-core warns against ('budgeting a long-running loop's cost as linear... or the wrong horizon').",
+      "correct_model": "each of the N=40-80 invocations gets an ISOLATED, freshly-bounded context per invocation (context-engineering-agent's DPDP-Section-4 per-story context isolation, already a named library convention for daemon per-user isolation under ADR-6). The quadratic Theta(T_i^2) cost RESETS per invocation. Total pipeline replay cost is therefore Sigma_{i=1}^{N} Cost_replay(T_i) = O(N * T_max^2) at worst case (linear in invocation count, quadratic only within each bounded invocation) — never O((N*T_max)^2).",
+      "worst_case_illustrative": "N=80, all class_I, all hit T_max=30: 80 * 589800 (post-compaction total, see budget_guard_B_per_invocation derivation) ~= 47.2M tokens — an explicit upper bound, not an expectation.",
+      "realistic_expected_illustrative": "using E[T]=1/p=6.67 turns for class_I instead of the T_max worst case: per-invocation expected replay ~= c*E[T]*(E[T]+1)/2 = 2000*6.67*7.67/2 ~= 51,100 tokens; across N=80 ~= 4.09M tokens. This expected figure, itemised per phase, is the number FR-COR-006's post-run cost display should approximate — it is large but BOUNDED, consistent with the product's accepted-not-gated cost stance."
+    },
+    "failure_semantics_invocation_57_of_80": {
+      "question": "if invocation #57 of 80 fails, what happens to the 56 before it?",
+      "answer": "they are NOT rolled back. PRD FR-SDL-004 mandates pipeline state persisted across process invocations; checkpointing is PER-PHASE-GATE, not per-invocation-transaction. A completed invocation whose phase's gate has already recorded PASS is a durable checkpoint (idempotent) and stays valid regardless of a later invocation's failure.",
+      "granularity_of_retry": "invocation #57 itself is retried individually first, at tool/provider-call granularity (retry_policy, tier 1) — this is far cheaper than any phase-level action and is tried first.",
+      "gate_atomicity": "if #57 is a member of an in-flight ANTICHAIN (parallel group) whose phase gate has not yet been evaluated, the gate evaluation is atomic PER PHASE: the phase cannot pass until every required member of that antichain reports. Sibling invocations in the same antichain that already completed are held (bounded by their own T_max/B, which prevents an indefinite stall) pending #57's outcome — they are not discarded, and re-running them is unnecessary once #57 resolves.",
+      "escalation_path": "if #57 exhausts its tier-1 retry cap and the phase's gate evaluator records REJECT/FAIL, that is an SC.1 event (tier 3, owned by the SDLC engine): root-cause-analysis-agent runs, retries the FAILING STEP up to 3 total SC iterations (PRD FR-SDL-002/AC-FR-SDL-002), with RE_ROUTE to Phase 1 on an architecture_gap cause or Phase 0 on a wrong_design_assumption cause. On a 4th consecutive failure, escalate to a human reviewer with the phase's full state preserved (AC-FR-SDL-002) — nothing ABOVE the current phase boundary is lost or re-run.",
+      "net_answer": "the 56 prior invocations survive as durable, gate-checkpointed artifacts; only invocation 57 (and any not-yet-started transitive dependents of it in the DAG) are actually at risk, and even that risk is bounded by three nested, increasingly coarse-grained recovery tiers before a human is ever paged."
+    }
+  },
+
+  "alignment_6_position": {
+    "question": "does LordCode ship ONE merged engine, or TWO layered engines (harness = lower layer executing one invocation; SDLC engine = upper layer sequencing phases and evaluating gates, a CLIENT of the harness)?",
+    "position": "TWO layered engines — the harness is the LOWER layer, the SDLC engine is the UPPER layer and a CLIENT of the harness. Argued FOR, not assumed.",
+    "reasoning": [
+      "the same WHAT/HOW split that governs a single agent loop (agent-loop-lifecycle-core Section 2: model decides WHAT, harness mediates HOW) recurs one level up: the SDLC engine decides WHAT sequence of phases/gates/agents constitutes a requirement's pipeline; the harness mediates HOW any ONE of those dispatched agent invocations actually executes (stop conditions, retries, budget, tool mediation). Merging them would blur exactly the boundary Operating Rule 1 forbids blurring.",
+      "the retry_hierarchy above is only coherent as three CLEANLY SEPARATED tiers if tier 3 (SC.1-3, gate-level) sits structurally above tiers 1-2 (call retry, circuit breaker) rather than being reimplemented inside the harness — SC.1-3 needs phase-scoped state (which gate, which prior phases passed) that is the SDLC engine's concern, not the harness's per-invocation loop state.",
+      "PRD FR-SDL-005 already requires 'which agents run' (SDLC engine) and 'which model each runs on' (router) to be independently overridable — the SAME orthogonality argument (Alignment 7) applies one layer down: 'which agents run in what phase order' (SDLC engine) and 'how one dispatched invocation is executed' (harness) must stay independently overridable too, or overriding a harness parameter (e.g. a provider fallback) would risk silently changing which agents the SDLC engine dispatches — exactly the coupling FR-SDL-005 forbids in the sibling case.",
+      "gate-calibration-scoring-core's GACS auto-approve scoring is explicitly a GATE-EVALUATOR concern (Phase 1.5 and Phase 5 pilots only) — it belongs to the SDLC engine's gate-evaluation logic, consuming S_RS/S_con from OTHER domains and S_loss's harm-probability generalisation from THIS domain's M4, but the decision itself (auto-approve vs escalate a PHASE gate) is upper-layer business, not something the harness's own stop predicate should absorb.",
+      "operationally: this makes B.1 (SDLC pipeline engine) and B.3 (harness/agent-loop runtime) genuinely parallelisable Phase-B work items (as orchestration_prompt.md's STEP 10 already marks them, 'B.2 parallel with B.3'), because a clean client/server layering lets them be built and tested independently against a stable interface, rather than as one entangled module that cannot be parallel-developed."
+    ],
+    "interface_the_HLD_must_specify": "the exact call the SDLC engine makes to dispatch one agent invocation through the harness (inputs: agent id, router-selected provider/model per Alignment 1, tool-set, T_max class, budget B; outputs: finishReason, abort_reason if any, tool-call trace for replay, cost). This is the seam consensus-agent's Phase-2 gate treats as mandatory (docs/orchestration_prompt.md line ~1512: 'An HLD that leaves this ambiguous is REJECTED').",
+    "caveat": "this is harness-engineering-architect's INPUT to solution-architect, per agent.md and Alignment 6's own text ('solution-architect owns the verdict, you supply the input') — it is not a final architectural decision. If Phase 1 disagrees, it must record why in an ADR."
+  }
+}

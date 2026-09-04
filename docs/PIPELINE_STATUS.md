@@ -157,6 +157,18 @@ API, raw file hosting, registry JSON, sub-path targeting) rather than searching.
 
 ---
 
+## Carry-forward obligations (raised at STOP 1 user review, 2026-09-04)
+
+Three items that are **correct as designed today but become defects if a later phase
+forgets them**. Recorded here because notes like these are exactly what get lost between
+phases; each names the phase that must discharge it.
+
+| # | Obligation | Discharged by | Why it matters |
+|---|---|---|---|
+| CF-1 | **Go is LOCKED** (OAQ-1 / ADR-2). No Phase 1 agent may reopen the language question. If it were reopened, the entire backend-engineer role shifts — `go-systems-engineer` out, one of rust/nodejs/python in — invalidating the roster, the thinking-budget table, and ADR-3's storage form. The single documented reopen trigger remains ADR-1 selecting an embedding-similarity topology. | Phase 1 — treat as settled input | A silent language change late would invalidate most of Phase 1 |
+| CF-2 | **RTM `HLD Component` and `Test Case` columns are TBD by design**, not by omission — they are Phase 1 and Phase D deliverables respectively. `solution-architect` MUST replace the HLD-component TBDs with real component names when the HLD lands, or traceability reads as incomplete rather than as staged. | Phase 1 (HLD column), Phase D (test-case column) | Staged emptiness is legitimate; permanent emptiness is a traceability failure |
+| CF-3 | **No "Sign in with ChatGPT" / OAuth button for OpenAI in v1.** Evidence grades third-party eligibility VERY LOW; the shipped Codex client is architecturally gated via an allow-listed redirect URI. The CLI contract and the terminal UX must offer the **API-key flow only** for OpenAI, and must not render, document, or imply an OAuth path until official support is confirmed. | Phase 1.5 (`cli_contract.json`), Phase 3 (`terminal_ux_spec.md`) | Promising an auth path that does not exist is a first-run product failure |
+
 ## Open decisions
 
 | ID | Decision | Owner | Status |
