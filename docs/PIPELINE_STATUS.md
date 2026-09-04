@@ -4,7 +4,7 @@ Live execution tracker for the plan in [`orchestration_prompt.md`](orchestration
 Updated as each phase completes. This is the file to read to know where things stand.
 
 **Last updated:** 2026-09-04
-**Current phase:** Phase 0 + 0.3 R&D COMPLETE
+**Current phase:** Phase 0 + R&D rounds 1-2 COMPLETE
 **Blocking on:** ** STOP 1 ** — user review of PRD.md + licence decision
 
 ---
@@ -85,6 +85,31 @@ three-agent chain rather than a single scout, run **sequentially** (plan → ret
 | OpenAI "Sign in with ChatGPT" OAuth | If open, materially better onboarding | **STILL OPEN** — GRADE VERY LOW. Docs silent by omission (Empirical gap) + one dead link (Reporting gap) |
 | Google Gemini Go SDK | Sizes the Gemini adapter cost | **CLOSED** — all 3 features GRADE HIGH via godoc + dated CHANGELOG. Reverses the scout's "largest gap" |
 | Prior art: pre-built specialist-agent corpus | LordCode's PRIMARY differentiator | **PARTIALLY OPEN** — GRADE VERY LOW (capped). 2 candidates resolved as community marketplaces; 2 stronger leads unfetchable (413/403) = Reporting gap |
+
+### Phase 0.4 — R&D round 2 (targeted lead retrieval)
+
+Round 1's meta-finding was that "unverified" meant *wrong URL tried*, not
+*unfavourable fact*. Round 2 therefore used fetch-path engineering (GitHub REST
+API, raw file hosting, registry JSON, sub-path targeting) rather than searching.
+
+| # | Item | Agent | Status |
+|---|---|---|---|
+| 0.4a | Targeted retrieval: 3/3 searches, ~40 free fetches incl. shipped-source drill-down | `deep-web-researcher` | ✅ |
+| 0.4b | GRADE + gap taxonomy + duplicate-candidate correction | `research-synthesis-analyst` | ✅ |
+
+| Item | Round 2 outcome |
+|---|---|
+| Q3 prior art | **Upgraded VERY LOW → LOW** (within the protocol cap, not beyond). Both Reporting gaps closed. **Correction: the apparent 4 candidates are really 3** — AgentsRoom's "270 agents" is a fork of an already-counted project |
+| Q1 OpenAI OAuth | **Split verdict.** GRADE HIGH that Codex's OAuth client is architecturally gated (allow-listed redirect URI in shipped source); GRADE VERY LOW that third parties are excluded — architecture is not policy |
+| Gemini billing separation | **CLOSED** at PRIMARY confidence |
+
+**Binding output — permitted README language:**
+
+| Claim | Status |
+|---|---|
+| Gemini Go SDK features, billing separation | May be stated as resolved |
+| OpenAI OAuth third-party eligibility | Must stay "unconfirmed" |
+| Specialist-agent corpus | **No "novel / first / unique / unmatched"** — only "no comparable corpus found across a two-round, budget-limited check" |
 
 | — | **STOP 1** — user reviews `PRD.md` + R&D findings, decides licence | *human* | — | ⏸️ **AWAITING YOU** |
 
