@@ -591,8 +591,11 @@ def generate_parallel(
     try:
         for wave_index, wave in enumerate(waves):
             specs = []
+            group_paths_by_label: dict[str, list[str]] = {}
             for gi in wave:
                 group_paths = groups[gi]
+                label = f"group-{gi}"
+                group_paths_by_label[label] = group_paths
                 deps_needed = {
                     dep
                     for p in group_paths
@@ -604,7 +607,7 @@ def generate_parallel(
                 )
                 specs.append(
                     AgentSpec(
-                        label=f"group-{gi}",
+                        label=label,
                         persona_fn=_persona_generate_subset,
                         args=(task, language, manifest, group_paths, context, skill, subagent, dependency_content),
                     )
@@ -613,7 +616,25 @@ def generate_parallel(
             raw_by_label = coordinator.run_agents_parallel(specs)
             for label, raw in raw_by_label.items():
                 group_files = _parse_files_json(raw)
+                assigned_paths = set(group_paths_by_label[label])
+                accepted_count = 0
                 for file_spec in group_files:
+                    if file_spec.path not in assigned_paths:
+                        # A coder call sometimes ignores the "generate ONLY
+                        # these files" instruction and echoes back files it
+                        # can see in the manifest but wasn't assigned. Since
+                        # group_paths already partitions the manifest, an
+                        # unassigned file is always safe to drop -- the
+                        # group that owns it (if any) still generates it in
+                        # its own call.
+                        on_event(
+                            {
+                                "type": "parallel_generation_unassigned_file_dropped",
+                                "label": label,
+                                "path": file_spec.path,
+                            }
+                        )
+                        continue
                     if file_spec.path in seen_paths:
                         raise GenerationError(
                             f"Duplicate file path '{file_spec.path}' produced by both "
@@ -621,7 +642,8 @@ def generate_parallel(
                         )
                     seen_paths[file_spec.path] = label
                     accumulated_files[file_spec.path] = file_spec
-                on_event({"type": "parallel_generation_group_completed", "label": label, "file_count": len(group_files)})
+                    accepted_count += 1
+                on_event({"type": "parallel_generation_group_completed", "label": label, "file_count": accepted_count})
             on_event({"type": "generation_wave_completed", "wave": wave_index, "group_count": len(wave)})
     finally:
         coordinator.stop()

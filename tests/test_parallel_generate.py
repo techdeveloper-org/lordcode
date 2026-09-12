@@ -126,7 +126,9 @@ def test_partition_manifest_respects_bounds(file_count, expected_group_count, ex
 # --- generate_parallel --------------------------------------------------------
 
 
-def _fake_persona_generate_subset(remote_llm, task, language, manifest, file_paths, context, skill, subagent):
+def _fake_persona_generate_subset(
+    remote_llm, task, language, manifest, file_paths, context, skill, subagent, dependency_content=None
+):
     return json.dumps({"files": [{"path": p, "content": f"content for {p}"} for p in file_paths]})
 
 
@@ -149,16 +151,16 @@ def test_generate_parallel_merges_groups_and_uses_run_agents_parallel(tmp_path, 
     assert all(f.content == f"content for {f.path}" for f in artifact.files)
 
 
-def _duplicate_persona(remote_llm, task, language, manifest, file_paths, context, skill, subagent):
-    # Both groups claim to have produced "a.py", regardless of which file_paths they were assigned.
-    return json.dumps({"files": [{"path": "a.py", "content": "x"}]})
-
-
-def test_generate_parallel_raises_on_duplicate_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(parallel_generate, "_persona_generate_subset", _duplicate_persona)
+def test_generate_parallel_raises_on_duplicate_path_within_assigned_paths(tmp_path, monkeypatch):
+    """A path both groups are actually assigned (a genuine partitioning bug,
+    since _partition_manifest should never produce overlapping groups) must
+    still raise -- unlike an unassigned over-generated file (see
+    test_generate_parallel_drops_unassigned_files_instead_of_raising), which
+    is safe to drop because the path's real owner group still produces it."""
+    monkeypatch.setattr(parallel_generate, "_persona_generate_subset", _fake_persona_generate_subset)
 
     manifest = [{"path": "a.py", "responsibility": "x"}, {"path": "b.py", "responsibility": "y"}]
-    groups = [["a.py"], ["b.py"]]
+    groups = [["a.py"], ["a.py", "b.py"]]  # overlapping on purpose -- not a real _partition_manifest output
 
     class _TripwireClient:
         def chat_completion(self, *a, **k):
@@ -169,3 +171,111 @@ def test_generate_parallel_raises_on_duplicate_path(tmp_path, monkeypatch):
 
     with pytest.raises(GenerationError, match="Duplicate file path 'a.py'"):
         parallel_generate.generate_parallel("task", "python", manifest, groups, router, client)
+
+
+def _over_generating_persona(
+    remote_llm, task, language, manifest, file_paths, context, skill, subagent, dependency_content=None
+):
+    # Ignores the "generate ONLY these files" instruction and returns every
+    # file in the manifest regardless of its own assigned file_paths --
+    # reproduces the real Groq behavior seen in GitHub issue #1.
+    return json.dumps({"files": [{"path": item["path"], "content": f"content for {item['path']}"} for item in manifest]})
+
+
+def test_generate_parallel_drops_unassigned_files_instead_of_raising(monkeypatch):
+    monkeypatch.setattr(parallel_generate, "_persona_generate_subset", _over_generating_persona)
+
+    manifest = [{"path": p, "responsibility": "x"} for p in ["a.py", "b.py", "c.py", "d.py"]]
+    groups = [["a.py", "b.py"], ["c.py", "d.py"]]
+
+    class _TripwireClient:
+        def chat_completion(self, *a, **k):
+            raise AssertionError("real LLM call should not happen")
+
+    client = _TripwireClient()
+    router = Router(_models(), client)
+    events = []
+
+    artifact = parallel_generate.generate_parallel(
+        "task", "python", manifest, groups, router, client, on_event=events.append
+    )
+
+    # Each path is kept exactly once, attributed to the group it was
+    # actually assigned to -- not silently dropped, not fatal.
+    assert sorted(f.path for f in artifact.files) == ["a.py", "b.py", "c.py", "d.py"]
+    dropped = [e for e in events if e["type"] == "parallel_generation_unassigned_file_dropped"]
+    assert len(dropped) == 4  # each group over-generated the other group's 2 files
+    assert {"type": "parallel_generation_group_completed", "label": "group-0", "file_count": 2} in events
+    assert {"type": "parallel_generation_group_completed", "label": "group-1", "file_count": 2} in events
+
+
+# --- _extract_manifest_dependencies (Milestone 9) ----------------------------
+
+
+def test_extract_manifest_dependencies_naming_convention_edge():
+    manifest = [
+        {"path": "models.py", "responsibility": "define the data model"},
+        {"path": "test_models.py", "responsibility": "test the data model"},
+    ]
+
+    dependencies = parallel_generate._extract_manifest_dependencies(manifest)
+
+    assert dependencies == {"test_models.py": {"models.py"}}
+
+
+def test_extract_manifest_dependencies_empty_for_unrelated_manifest():
+    manifest = [{"path": "a.py", "responsibility": "x"}, {"path": "b.py", "responsibility": "y"}]
+
+    assert parallel_generate._extract_manifest_dependencies(manifest) == {}
+
+
+# --- generate_parallel wave-based dependency content passing (Milestone 9) --
+
+
+def _dependency_echoing_persona(
+    remote_llm, task, language, manifest, file_paths, context, skill, subagent, dependency_content=None
+):
+    """Persona whose returned content encodes the dependency_content it was
+    given, so a monkeypatch running across AgentCoordinator's real
+    multiprocessing boundary can still be asserted on from the parent
+    process (a plain side-effect list would not survive that boundary)."""
+    encoded_deps = json.dumps(dependency_content) if dependency_content else "no-deps"
+    return json.dumps({"files": [{"path": p, "content": encoded_deps} for p in file_paths]})
+
+
+def test_generate_parallel_passes_earlier_wave_content_to_dependent_group(monkeypatch):
+    """A cross-group dependency (via naming convention) must place the
+    dependent file's group in a later wave, and that later group's persona
+    call must receive the earlier wave's actual generated content -- not
+    just the manifest's one-line description."""
+    monkeypatch.setattr(parallel_generate, "_persona_generate_subset", _dependency_echoing_persona)
+
+    manifest = [
+        {"path": "models.py", "responsibility": "define the data model"},
+        {"path": "test_models.py", "responsibility": "test the data model"},
+    ]
+    # Forced into separate groups so the naming-convention dependency edge
+    # (test_models.py -> models.py) becomes a cross-group edge.
+    groups = [["models.py"], ["test_models.py"]]
+
+    class _TripwireClient:
+        def chat_completion(self, *a, **k):
+            raise AssertionError("real LLM call should not happen")
+
+    client = _TripwireClient()
+    router = Router(_models(), client)
+    events = []
+
+    artifact = parallel_generate.generate_parallel(
+        "task", "python", manifest, groups, router, client, on_event=events.append
+    )
+
+    assert {"type": "generation_wave_completed", "wave": 0, "group_count": 1} in events
+    assert {"type": "generation_wave_completed", "wave": 1, "group_count": 1} in events
+
+    files_by_path = {f.path: f.content for f in artifact.files}
+    # Wave 0 (models.py) has no dependency content yet.
+    assert files_by_path["models.py"] == "no-deps"
+    # Wave 1 (test_models.py) receives wave 0's real generated content,
+    # not just the manifest's one-line description.
+    assert files_by_path["test_models.py"] == json.dumps({"models.py": "no-deps"})
