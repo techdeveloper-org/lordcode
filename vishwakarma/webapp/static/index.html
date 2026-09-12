@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vishwakarma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="h-screen w-screen bg-zinc-950 text-zinc-100 antialiased overflow-hidden">
+  <div class="app-shell h-full w-full flex flex-col md:flex-row">
+
+    <!-- FAR LEFT: chat/session history -->
+    <aside class="history-pane w-full md:w-[220px] md:h-full flex-shrink-0 border-b md:border-b-0 md:border-r border-white/10 bg-black/40 flex flex-col">
+      <div class="p-4 border-b border-white/10">
+        <button id="new-chat" class="btn-ghost w-full">+ New chat</button>
+      </div>
+      <div id="session-list" class="flex-1 overflow-y-auto p-2 flex flex-col gap-1"></div>
+    </aside>
+
+    <!-- LEFT: prompt / controls -->
+    <aside class="left-pane w-full md:w-[380px] md:h-full flex-shrink-0 border-b md:border-b-0 md:border-r border-white/10 bg-zinc-900/60 backdrop-blur-xl flex flex-col overflow-y-auto">
+      <div class="p-6 flex flex-col gap-6">
+        <div class="flex items-center gap-3">
+          <div class="forge-icon w-11 h-11 rounded-2xl flex items-center justify-center text-2xl shrink-0">⚒</div>
+          <div>
+            <h1 class="text-lg font-extrabold tracking-tight leading-none">Vishwakarma</h1>
+            <p class="text-xs text-zinc-400 mt-1">Forged on Groq</p>
+          </div>
+        </div>
+
+        <div>
+          <label for="task" class="field-label">What do you want built?</label>
+          <textarea id="task" rows="5"
+            class="input-base resize-y"
+            placeholder="e.g. a function that reverses a linked list, with tests"></textarea>
+        </div>
+
+        <div>
+          <label for="workdir" class="field-label">Project location <span class="field-hint">(where to write the code)</span></label>
+          <input type="text" id="workdir" class="input-base text-sm" placeholder="./vishwakarma-output (default)" />
+        </div>
+
+        <div class="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex flex-col gap-2">
+          <label class="flex items-center gap-2 text-sm font-medium text-zinc-200">
+            <input type="checkbox" id="sdlc_mode" class="accent-amber-500 w-4 h-4" />
+            Full-SDLC mode <span class="field-hint">(SRS &rarr; HLD &rarr; Implement)</span>
+          </label>
+        </div>
+
+        <div id="sdlc-panel" hidden class="flex flex-col gap-4">
+          <div class="flex items-center gap-2 text-xs text-zinc-500">
+            <span id="sdlc-step-srs" class="sdlc-step active">1. SRS</span>
+            <span class="sdlc-step-arrow">&rarr;</span>
+            <span id="sdlc-step-hld" class="sdlc-step">2. HLD</span>
+            <span class="sdlc-step-arrow">&rarr;</span>
+            <span id="sdlc-step-implement" class="sdlc-step">3. Implement</span>
+            <span class="sdlc-step-arrow">&rarr;</span>
+            <span id="sdlc-step-docs" class="sdlc-step">4. Docs</span>
+            <span class="sdlc-step-arrow">&rarr;</span>
+            <span id="sdlc-step-api" class="sdlc-step">5. API</span>
+            <span class="sdlc-step-arrow">&rarr;</span>
+            <span id="sdlc-step-git" class="sdlc-step">6. Git</span>
+            <span class="sdlc-step-arrow">&rarr;</span>
+            <span id="sdlc-step-reconcile" class="sdlc-step">7. Reconcile</span>
+            <span class="sdlc-step-arrow">&rarr;</span>
+            <span id="sdlc-step-jira" class="sdlc-step">8. Jira</span>
+          </div>
+
+          <div id="sdlc-srs-wrap" hidden>
+            <h3 class="section-label mb-2">SRS.md</h3>
+            <pre id="sdlc-srs-content" class="code-pre text-xs max-h-56"></pre>
+            <p id="sdlc-srs-path" class="text-[0.7rem] text-zinc-500 mt-1"></p>
+          </div>
+
+          <div id="sdlc-hld-wrap" hidden>
+            <h3 class="section-label mb-2">HLD.md</h3>
+            <pre id="sdlc-hld-content" class="code-pre text-xs max-h-56"></pre>
+            <p id="sdlc-hld-path" class="text-[0.7rem] text-zinc-500 mt-1"></p>
+          </div>
+
+          <div id="sdlc-docs-wrap" hidden>
+            <h3 class="section-label mb-2">UML Diagrams</h3>
+            <div id="sdlc-docs-content" class="flex flex-col gap-2 max-h-56 overflow-y-auto"></div>
+            <p id="sdlc-docs-summary" class="text-[0.7rem] text-zinc-500 mt-1"></p>
+          </div>
+
+          <div id="sdlc-api-wrap" hidden>
+            <h3 class="section-label mb-2">OpenAPI Contract</h3>
+            <pre id="sdlc-api-content" class="code-pre text-xs max-h-56"></pre>
+            <p id="sdlc-api-summary" class="text-[0.7rem] text-zinc-500 mt-1"></p>
+          </div>
+
+          <div id="sdlc-git-wrap" hidden>
+            <h3 class="section-label mb-2">Git</h3>
+            <p id="sdlc-git-summary" class="text-[0.7rem] text-zinc-500 mt-1"></p>
+          </div>
+
+          <div id="sdlc-reconcile-wrap" hidden>
+            <h3 class="section-label mb-2">Full-Stack Reconciliation</h3>
+            <p id="sdlc-reconcile-summary" class="text-[0.7rem] text-zinc-500 mt-1"></p>
+          </div>
+
+          <div id="sdlc-jira-input-wrap" hidden class="flex flex-col gap-2">
+            <label for="jira-project-key" class="field-label">Jira project key</label>
+            <input type="text" id="jira-project-key" class="input-base text-sm" placeholder="e.g. PROJ" />
+            <label class="flex items-center gap-2 text-sm font-medium text-zinc-200">
+              <input type="checkbox" id="jira-sprint" class="accent-amber-500 w-4 h-4" />
+              Also create a Sprint
+            </label>
+            <input type="text" id="jira-sprint-name" class="input-base text-sm" placeholder="Sprint name (optional)" />
+          </div>
+
+          <div id="sdlc-jira-wrap" hidden>
+            <h3 class="section-label mb-2">Jira</h3>
+            <p id="sdlc-jira-summary" class="text-[0.7rem] text-zinc-500 mt-1"></p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4">
+          <div>
+            <label for="skill" class="field-label">Skill <span class="field-hint">(type to search, optional)</span></label>
+            <input list="skill-options" id="skill" class="input-base" placeholder="Auto-match" autocomplete="off" />
+            <datalist id="skill-options"></datalist>
+          </div>
+
+          <div>
+            <label for="agent" class="field-label">Agent persona <span class="field-hint">(type to search, optional)</span></label>
+            <input list="agent-options" id="agent" class="input-base" placeholder="Default" autocomplete="off" />
+            <datalist id="agent-options"></datalist>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex flex-col gap-2">
+          <label class="flex items-center gap-2 text-sm font-medium text-zinc-200">
+            <input type="checkbox" id="use_rag" class="accent-amber-500 w-4 h-4" />
+            Use existing project context (RAG)
+          </label>
+          <input type="text" id="project_dir" class="input-base text-sm" placeholder="Existing project path to search" disabled />
+        </div>
+
+        <button id="submit" class="btn-forge">
+          <span class="btn-label">Generate</span>
+          <span class="spinner" hidden></span>
+        </button>
+
+        <div id="meta" class="flex flex-wrap gap-2"></div>
+
+        <div id="plan-wrap" hidden class="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <h3 class="section-label">Implementation plan</h3>
+          <pre id="plan" class="code-pre text-xs max-h-56"></pre>
+        </div>
+      </div>
+    </aside>
+
+    <!-- RIGHT: preview / code / tests -->
+    <main class="right-pane flex-1 min-w-0 flex flex-col relative">
+      <div id="workspace-header" hidden class="px-4 py-2 border-b border-white/10 bg-zinc-900/40 text-xs text-zinc-400 flex items-center gap-2">
+        <span>Writing to:</span>
+        <code id="workspace-path" class="text-amber-400"></code>
+      </div>
+
+      <div id="empty-state" class="flex-1 flex flex-col items-center justify-center text-center px-8 text-zinc-500">
+        <div class="forge-icon w-16 h-16 rounded-3xl flex items-center justify-center text-4xl mb-5 opacity-90">⚒</div>
+        <p class="max-w-sm leading-relaxed">Describe a task on the left and hit <span class="text-amber-400 font-semibold">Generate</span>.<br />Code, tests, and a live preview will appear here.</p>
+      </div>
+
+      <div id="workspace" hidden class="flex flex-col h-full min-h-0">
+        <nav class="flex gap-1 px-4 pt-3 border-b border-white/10 bg-zinc-900/40 backdrop-blur">
+          <button class="tab-btn active" data-tab="code">Code</button>
+          <button class="tab-btn" data-tab="preview">Preview</button>
+          <button class="tab-btn" data-tab="tests">Tests</button>
+          <button class="tab-btn" data-tab="activity">Activity</button>
+        </nav>
+
+        <div id="tab-code" class="tab-panel active flex-1 min-h-0">
+          <div class="flex w-full h-full min-h-0">
+            <div id="file-tree" class="file-list"></div>
+            <div class="flex-1 min-w-0 flex flex-col">
+              <div id="editor-tab" class="editor-tab-bar"></div>
+              <pre id="file-content-pre" class="code-pre flex-1 m-0 rounded-none border-none overflow-auto"><code id="file-content"></code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-preview" class="tab-panel flex-1 min-h-0 flex-col">
+          <iframe id="preview-frame" title="Live preview" sandbox="allow-scripts" class="flex-1 w-full border-none bg-white"></iframe>
+          <div id="preview-unavailable" class="p-6 text-zinc-400 text-sm leading-relaxed" hidden>
+            Live preview renders HTML output for web-stack tasks. This run produced non-HTML files — check the Code tab instead.
+          </div>
+        </div>
+
+        <div id="tab-tests" class="tab-panel flex-1 min-h-0 flex-col p-5 overflow-y-auto">
+          <div id="attempts" class="flex flex-col gap-2"></div>
+        </div>
+
+        <div id="tab-activity" class="tab-panel flex-1 min-h-0 flex-col p-5 overflow-y-auto gap-4">
+          <div id="engineered-prompt-wrap" hidden>
+            <h3 class="section-label mb-2">Engineered prompt</h3>
+            <pre id="engineered-prompt" class="code-pre text-xs max-h-48"></pre>
+          </div>
+          <div id="stream-output-wrap" hidden>
+            <h3 class="section-label mb-2">Live output</h3>
+            <div id="stream-output-label" class="text-[0.7rem] text-zinc-500 mb-1"></div>
+            <pre id="stream-output" class="code-pre text-xs max-h-48"></pre>
+          </div>
+          <div>
+            <h3 class="section-label mb-2">Pipeline log</h3>
+            <div id="activity-log" class="activity-log activity-log-lg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="error-panel" hidden class="m-6 rounded-xl border border-red-500/40 bg-red-500/10 p-6">
+        <h2 class="text-red-400 font-bold text-lg mb-2">Something went wrong</h2>
+        <p id="error-message" class="text-red-200 text-sm"></p>
+      </div>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

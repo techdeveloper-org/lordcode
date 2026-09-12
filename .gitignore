@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+.benchmarks/
+server.log
+vishwakarma-sessions.json
+vishwakarma-output/

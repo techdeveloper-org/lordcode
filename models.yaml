@@ -1,0 +1,53 @@
+providers:
+  groq:
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    rpm_budget: 30
+
+# Switched fully to Groq (2026-09-11) -- NVIDIA NIM removed entirely.
+# NVIDIA's free tier was blocked by two separate, unresolved issues: a
+# platform-level 403 "Authorization failed" bug on Personal-org accounts,
+# and most of its catalog returning 404 "Function not found for account"
+# (listed in /v1/models but never actually entitled for this account).
+# Groq's free tier is an ongoing rate-limited tier (~30 RPM, ~6K TPM,
+# ~14.4K RPD), not a burnable dollar credit, with no card required.
+#
+# 2026-09-11: llama-3.1-8b-instant and llama-3.3-70b-versatile are NOT in
+# this account's live catalog (checked via /v1/models) despite being
+# documented on Groq's docs site -- dropped entirely rather than left as
+# dead candidates. Every model ID below was live-tested with a real chat
+# completion call and confirmed working (sub-2-second responses, correct
+# code) before being pinned here.
+#
+# 2026-09-11: tried adding Cerebras as a fallback provider (cloud.cerebras.ai
+# markets 1M tokens/day free, no card required) and removed it again the
+# same day -- live-tested account is actually pay-as-you-go with a $0.00
+# balance and no active subscription, so every model returned 402 "Payment
+# required" regardless of the dashboard's Limits tab showing quota tables
+# for it. Same failure pattern as NVIDIA NIM above: advertised free tier,
+# not actually entitled for this account. Do not re-add without a live
+# successful chat-completion call confirming real access first.
+roles:
+  primary_coder:
+    # Largest available model -- confirmed ~1.2s response with clean,
+    # correct code on a live test call.
+    - {provider: groq, model: openai/gpt-oss-120b}
+    - {provider: groq, model: openai/gpt-oss-20b}
+  router_fast:
+    # Smallest/fastest model -- confirmed ~0.3s response, exactly the
+    # "cheap and quick" role needs (classification only).
+    - {provider: groq, model: openai/gpt-oss-20b}
+    - {provider: groq, model: openai/gpt-oss-120b}
+  reasoner:
+    # qwen3.6-27b visibly emits a <think>...</think> reasoning trace before
+    # its answer -- the closest fit on this catalog for the self-heal
+    # "diagnose this failure" step, which benefits from an explicit
+    # reasoning pass.
+    - {provider: groq, model: qwen/qwen3.6-27b}
+    - {provider: groq, model: openai/gpt-oss-120b}
+  fallback_long_context:
+    - {provider: groq, model: openai/gpt-oss-120b}
+    - {provider: groq, model: openai/gpt-oss-20b}
+
+max_heal_attempts: 3
+heal_timeout_seconds: 300
