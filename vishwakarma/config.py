@@ -38,13 +38,22 @@ class ProviderConfig:
     tokens-per-minute limit alongside its requests-per-minute limit, while a
     local runtime has neither in any meaningful sense. None disables token
     accounting for that provider; the request budget still applies.
+
+    api_key_required exists because a local runtime has no key at all, and
+    LLMClient.is_available gated purely on a non-empty env var -- so a keyless
+    Ollama was unselectable by construction and "any LLM is just
+    configuration" was false for precisely the provider class that runs
+    without spend. When it is False, api_key_env may be omitted: naming an
+    environment variable for a credential that does not exist is worse than
+    leaving it out, because it implies the variable means something.
     """
 
     name: str
     base_url: str
-    api_key_env: str
     rpm_budget: int
+    api_key_env: str = ""
     tpm_budget: int | None = None
+    api_key_required: bool = True
 
 
 @dataclass(frozen=True)
@@ -88,15 +97,24 @@ def _parse_providers(raw: dict) -> dict[str, ProviderConfig]:
 
     providers: dict[str, ProviderConfig] = {}
     for name, spec in providers_raw.items():
-        for key in ("base_url", "api_key_env", "rpm_budget"):
+        for key in ("base_url", "rpm_budget"):
             if key not in spec:
                 raise ConfigError(f"providers.{name} is missing required key '{key}'")
+
+        key_required = bool(spec.get("api_key_required", True))
+        if key_required and "api_key_env" not in spec:
+            raise ConfigError(
+                f"providers.{name} is missing required key 'api_key_env' -- "
+                "set api_key_required: false for a provider that needs no key"
+            )
+
         tpm_raw = spec.get("tpm_budget")
         providers[name] = ProviderConfig(
             name=name,
             base_url=spec["base_url"],
-            api_key_env=spec["api_key_env"],
+            api_key_env=spec.get("api_key_env", ""),
             rpm_budget=int(spec["rpm_budget"]),
+            api_key_required=key_required,
             tpm_budget=int(tpm_raw) if tpm_raw is not None else None,
         )
     return providers

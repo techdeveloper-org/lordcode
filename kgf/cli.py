@@ -16,6 +16,7 @@ from kgf import ids
 from kgf.closure import build_closure
 from kgf.context import DEFAULT_TOKEN_BUDGET, Intent, assemble_context
 from kgf.errors import LibraryNotFoundError, ProblemLog, Severity
+from kgf import manifest as manifest_module
 from kgf.loader import load_graph
 from kgf.patterns import load_decision_tree
 from kgf.roles import classify
@@ -133,6 +134,9 @@ def route(
     complexity: str = typer.Option(
         "", "--complexity", help="solo | squad | enterprise -- the D13 answer, used for phase pruning."
     ),
+    manifest_path: Path = typer.Option(
+        None, "--manifest", help="Write an ADR-7 run manifest here for later replay."
+    ),
 ) -> None:
     """Select the agent best suited to a task, showing why."""
     graph, _log = _load(library)
@@ -176,6 +180,10 @@ def route(
         )
     else:
         typer.echo("pattern: no D14 branch for this domain")
+
+    if manifest_path is not None:
+        written = manifest_module.build(task, source, result).write(manifest_path)
+        typer.echo(f"manifest: {written}")
 
 
 @app.command()
@@ -262,6 +270,9 @@ def context(
     ),
     budget: int = typer.Option(DEFAULT_TOKEN_BUDGET, "--budget", help="Token ceiling."),
     show_text: bool = typer.Option(False, "--show-text", help="Print the assembled context."),
+    manifest_path: Path = typer.Option(
+        None, "--manifest", help="Write an ADR-7 run manifest here for later replay."
+    ),
 ) -> None:
     """Assemble budgeted prompt context for a task."""
     graph, _log = _load(library)
@@ -280,8 +291,10 @@ def context(
 
     if agent_name:
         chosen = agent_name
+        selection = None
     else:
         result = Selector(graph, source).select(task, limit=1)
+        selection = result
         if result.best is None:
             typer.secho("no agent matched this task", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
@@ -314,6 +327,19 @@ def context(
 
     if show_text:
         typer.echo("\n" + assembled.text)
+
+    if manifest_path is not None:
+        written = manifest_module.build(
+            task,
+            source,
+            selection,
+            agent_closure,
+            assembled,
+            intent=resolved_intent.value,
+            budget_tokens=budget,
+            forced_agent=selection is None,
+        ).write(manifest_path)
+        typer.echo(f"manifest: {written}")
 
 
 @app.command()
@@ -426,6 +452,48 @@ def topology(
                 continue
             typer.echo(f"{phase_id}  [{phase.provenance}]")
             typer.echo(f"    {phase.rationale}")
+
+
+@app.command()
+def replay(
+    manifest_file: Path = typer.Argument(..., help="A manifest written by --manifest."),
+    library: Path = _LIBRARY_OPTION,
+) -> None:
+    """Re-derive a recorded run from the current library and report what changed.
+
+    ADR-7. Makes no model call: selection ranks lexically and context assembly
+    reads markdown, so a replay is disk and arithmetic. Exits non-zero when
+    anything differs, which is what makes it usable as a drift gate rather than
+    something a human has to read and compare by eye.
+    """
+    if not manifest_file.is_file():
+        typer.secho(f"no manifest at {manifest_file}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    try:
+        recorded = manifest_module.load(manifest_file)
+    except (ValueError, TypeError) as exc:
+        typer.secho(f"{manifest_file} is not a readable manifest: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(f"manifest:        {manifest_file}")
+    typer.echo(f"written:         {recorded.created_at}")
+    typer.echo(f"schema:          v{recorded.manifest_version}")
+    typer.echo(f"task:            {recorded.task[:80]}")
+    typer.echo(f"recorded agent:  {recorded.agent or '(none)'} ({recorded.outcome or 'n/a'})")
+
+    try:
+        report = manifest_module.replay(recorded, library)
+    except LibraryNotFoundError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo("")
+    if report.matches:
+        typer.secho(report.summary(), fg=typer.colors.GREEN)
+        return
+    typer.secho(report.summary(), fg=typer.colors.YELLOW, err=True)
+    raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
