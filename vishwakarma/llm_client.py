@@ -28,6 +28,27 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 1.0
 MAX_BACKOFF_SECONDS = 30.0
+
+RATE_LIMIT_WALL_CLOCK_SECONDS = 150.0
+"""Total wall-clock ceiling on retrying ONE call that keeps returning 429.
+
+A rate limit differs from every other transient failure in that retrying the
+same candidate is the only correct response -- the next candidate shares the
+same key, and therefore the same exhausted budget, so advancing to it merely
+burns a fallback for nothing (see calling.py). But 'retry the same candidate'
+without a bound is an infinite loop against a key that is out of quota for
+the day, so the retry is bounded by wall clock rather than by attempt count:
+the provider's own Retry-After may be tens of seconds, which a fixed small
+attempt count would exhaust far too early."""
+
+CHARS_PER_TOKEN_ESTIMATE = 4
+"""Crude but adequate chars-to-tokens ratio for pre-flight budgeting.
+
+The limiter needs a cost estimate BEFORE the call, and the only exact source
+is the provider's own post-hoc usage report. Four characters per token is the
+standard approximation for English prose and code; it is used solely to
+decide admission order, never to report usage, so a modest error costs a
+slightly early or late admission and nothing else."""
 REQUEST_TIMEOUT_SECONDS = 120.0
 """Applied as httpx's connect/read/write timeout. Because every call streams
 (see chat_completion), the 'read' timeout means max seconds between chunks,
@@ -70,6 +91,75 @@ class EmptyResponseError(Exception):
         super().__init__(f"Model '{model}' on provider '{provider}' returned an empty/malformed response")
 
 
+class RateLimitExhaustedError(Exception):
+    """Raised when one call kept returning 429 until its wall-clock bound ran out.
+
+    Deliberately NOT an openai.APIError subclass, and deliberately distinct
+    from the candidate-level failures above. calling.py treats those as
+    "this candidate is broken, advance the router" -- which is exactly the
+    wrong response to a rate limit, because every candidate for the role
+    resolves to the same key and therefore the same exhausted budget.
+    Advancing would spend the role's whole fallback chain on one throttled
+    minute and then raise ConfigError as though the models had vanished.
+    So this type propagates past calling.py untouched, leaving the router's
+    active candidate exactly where it was.
+    """
+
+    def __init__(self, provider: str, model: str, elapsed_seconds: float, attempts: int):
+        self.provider = provider
+        self.model = model
+        self.elapsed_seconds = elapsed_seconds
+        self.attempts = attempts
+        super().__init__(
+            f"Provider '{provider}' rate-limited model '{model}' for "
+            f"{elapsed_seconds:.0f}s across {attempts} attempt(s); giving up on this call. "
+            f"The key's per-minute or per-day quota is exhausted -- retry later, "
+            f"or add a second key/provider to spread the budget."
+        )
+
+
+def estimate_call_tokens(messages: list[dict[str, str]], max_tokens: int | None) -> int:
+    """Estimate one call's total token cost for pre-flight rate limiting.
+
+    Counts the prompt AND the requested completion, because a tokens-per-minute
+    ceiling is charged on both and the completion is usually the larger half:
+    the coder role sends a ~2000-token prompt and asks for up to 8000 back.
+
+    Args:
+        messages: OpenAI-format chat messages about to be sent.
+        max_tokens: The call's requested completion ceiling, or None if the
+            caller did not set one.
+
+    Returns:
+        Estimated total tokens, never negative.
+    """
+    prompt_chars = sum(len(str(message.get("content") or "")) for message in messages)
+    prompt_tokens = prompt_chars // CHARS_PER_TOKEN_ESTIMATE
+    return prompt_tokens + int(max_tokens or 0)
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Read a 429's Retry-After hint, in seconds, if the provider sent one.
+
+    Groq returns it as a seconds value; the header is optional and other
+    OpenAI-compatible providers may omit it or send an HTTP date, so anything
+    not parseable as a positive number is reported as absent and the caller
+    falls back to exponential backoff.
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    raw = headers.get("retry-after") or headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
 class LLMClient:
     """Wraps every configured provider with per-(provider, key) rate limiting and retries."""
 
@@ -88,10 +178,17 @@ class LLMClient:
         return bool(os.environ.get(env_name))
 
     def _get_limiter(self, provider: str, env_name: str) -> RateLimiter:
-        """Lazily construct (and cache) a rate limiter for one (provider, key) pair."""
+        """Lazily construct (and cache) a rate limiter for one (provider, key) pair.
+
+        Keyed by (provider, key) rather than by provider alone because the
+        physical budgets belong to the KEY: two candidates pointing at the
+        same provider through different key env vars have genuinely separate
+        quotas and must not share a bucket.
+        """
         cache_key = (provider, env_name)
         if cache_key not in self._limiters:
-            self._limiters[cache_key] = RateLimiter(self._providers[provider].rpm_budget)
+            config = self._providers[provider]
+            self._limiters[cache_key] = RateLimiter(config.rpm_budget, config.tpm_budget)
         return self._limiters[cache_key]
 
     def _get_client(self, provider: str, api_key_env: str | None = None) -> openai.OpenAI:
@@ -167,15 +264,25 @@ class LLMClient:
                 separate access approval -- NVIDIA's catalog does this for
                 some entries), on this provider.
             EmptyResponseError: If the stream ends with no content at all.
+            RateLimitExhaustedError: If the provider kept returning 429 for
+                RATE_LIMIT_WALL_CLOCK_SECONDS. Distinct from the errors above
+                because it says nothing about this model's health -- the key's
+                quota is spent, so advancing to another candidate would only
+                waste the role's fallback chain.
             openai.APIError: For any other unrecoverable API error.
         """
         client = self._get_client(provider, api_key_env)
         env_name = self._resolve_api_key_env(provider, api_key_env)
         limiter = self._get_limiter(provider, env_name)
+        estimated_tokens = estimate_call_tokens(messages, kwargs.get("max_tokens"))
 
+        rate_limit_started: float | None = None
+        rate_limit_attempts = 0
         last_error: Exception | None = None
-        for attempt in range(1, MAX_RETRIES + 1):
-            limiter.acquire(priority=priority)
+        attempt = 0
+        while attempt < MAX_RETRIES:
+            attempt += 1
+            limiter.acquire(priority=priority, estimated_tokens=estimated_tokens)
             try:
                 stream = client.chat.completions.create(
                     model=model, messages=messages, stream=True, **kwargs
@@ -195,6 +302,44 @@ class LLMClient:
                 return "".join(pieces)
             except (openai.NotFoundError, openai.PermissionDeniedError) as exc:
                 raise ModelUnavailableError(provider, model) from exc
+            except openai.RateLimitError as exc:
+                # A 429 is the one transient failure that must NOT count
+                # against MAX_RETRIES or advance the router: the next
+                # candidate shares this key's exhausted budget, so the only
+                # useful response is to wait on this same candidate. The
+                # attempt counter is therefore rolled back and the loop is
+                # bounded by wall clock instead -- see
+                # RATE_LIMIT_WALL_CLOCK_SECONDS.
+                now = time.monotonic()
+                if rate_limit_started is None:
+                    rate_limit_started = now
+                rate_limit_attempts += 1
+                elapsed = now - rate_limit_started
+                if elapsed >= RATE_LIMIT_WALL_CLOCK_SECONDS:
+                    raise RateLimitExhaustedError(
+                        provider, model, elapsed, rate_limit_attempts
+                    ) from exc
+
+                attempt -= 1
+                hinted = _retry_after_seconds(exc)
+                if hinted is None:
+                    hinted = min(
+                        BASE_BACKOFF_SECONDS * (2 ** (rate_limit_attempts - 1)),
+                        MAX_BACKOFF_SECONDS,
+                    )
+                remaining = RATE_LIMIT_WALL_CLOCK_SECONDS - elapsed
+                delay = min(hinted, remaining)
+                logger.warning(
+                    "429 from provider=%s model=%s (rate-limit attempt %d, %.0fs elapsed of %.0fs); "
+                    "waiting %.1fs and retrying the SAME candidate",
+                    provider,
+                    model,
+                    rate_limit_attempts,
+                    elapsed,
+                    RATE_LIMIT_WALL_CLOCK_SECONDS,
+                    delay,
+                )
+                time.sleep(delay)
             except openai.APIError as exc:
                 # Free-tier proxies (OpenRouter routing to an overloaded
                 # upstream, etc.) surface capacity/transient failures under a
@@ -220,5 +365,12 @@ class LLMClient:
                 )
                 time.sleep(delay)
 
-        assert last_error is not None
+        if last_error is None:
+            # Reachable only if MAX_RETRIES is misconfigured to <= 0, in which
+            # case the loop body never ran. A bare assert would strip under -O
+            # and leave an implicit `return None` violating the -> str contract.
+            raise RuntimeError(
+                f"chat_completion made no attempt for provider={provider!r} model={model!r}: "
+                f"MAX_RETRIES is {MAX_RETRIES}, which must be at least 1"
+            )
         raise last_error

@@ -266,32 +266,24 @@ def generate_srs(
     # shared RateLimiter/Router stay honest -- see engine/agent_runtime.py.
     coordinator = AgentCoordinator(router, client, on_event=on_event)
     try:
-        process, agent_id = coordinator.spawn_agent(_persona_engineer_context, (raw_requirements,))
-        process.join()
-        context_block = coordinator.await_result(agent_id)
+        context_block = coordinator.run_agent(_persona_engineer_context, (raw_requirements,))
         on_event({"type": "srs_context_engineered", "context": context_block})
 
-        process, agent_id = coordinator.spawn_agent(
+        engineered_requirements = coordinator.run_agent(
             _persona_engineer_prompt, (raw_requirements, context_block)
         )
-        process.join()
-        engineered_requirements = coordinator.await_result(agent_id)
         on_event({"type": "srs_prompt_engineered", "prompt": engineered_requirements})
 
-        process, agent_id = coordinator.spawn_agent(_persona_generate_srs, (engineered_requirements,))
-        process.join()
-        srs = coordinator.await_result(agent_id)
+        srs = coordinator.run_agent(_persona_generate_srs, (engineered_requirements,))
 
         missing = _missing_headings(srs, SRS_REQUIRED_HEADINGS)
         if missing:
             raise GenerationError(f"Generated SRS is missing required section(s): {', '.join(missing)}")
 
-        process, agent_id = coordinator.spawn_agent(
+        approved, verdict = coordinator.run_agent(
             _persona_consensus_review,
             (raw_requirements, srs, 1, SRS_INVENTED_SCOPE_INSTRUCTION),
         )
-        process.join()
-        approved, verdict = coordinator.await_result(agent_id)
     finally:
         coordinator.stop()
 
@@ -347,29 +339,21 @@ def generate_hld(
     # shared RateLimiter/Router stay honest -- see engine/agent_runtime.py.
     coordinator = AgentCoordinator(router, client, on_event=on_event)
     try:
-        process, agent_id = coordinator.spawn_agent(_persona_engineer_context, (raw_input,))
-        process.join()
-        context_block = coordinator.await_result(agent_id)
+        context_block = coordinator.run_agent(_persona_engineer_context, (raw_input,))
         on_event({"type": "hld_context_engineered", "context": context_block})
 
-        process, agent_id = coordinator.spawn_agent(_persona_engineer_prompt, (raw_input, context_block))
-        process.join()
-        engineered_input = coordinator.await_result(agent_id)
+        engineered_input = coordinator.run_agent(_persona_engineer_prompt, (raw_input, context_block))
         on_event({"type": "hld_prompt_engineered", "prompt": engineered_input})
 
-        process, agent_id = coordinator.spawn_agent(_persona_generate_hld, (engineered_input,))
-        process.join()
-        hld = coordinator.await_result(agent_id)
+        hld = coordinator.run_agent(_persona_generate_hld, (engineered_input,))
 
         missing = _missing_headings(hld, HLD_REQUIRED_HEADINGS)
         if missing:
             raise GenerationError(f"Generated HLD is missing required section(s): {', '.join(missing)}")
 
-        process, agent_id = coordinator.spawn_agent(
+        approved, verdict = coordinator.run_agent(
             _persona_consensus_review, (task_context, hld, 1, None)
         )
-        process.join()
-        approved, verdict = coordinator.await_result(agent_id)
     finally:
         coordinator.stop()
 

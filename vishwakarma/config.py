@@ -31,12 +31,20 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    """One OpenAI-compatible provider: where to call it and which env var holds its key."""
+    """One OpenAI-compatible provider: where to call it and which env var holds its key.
+
+    tpm_budget is optional because the two ceilings are independent and not
+    every provider publishes both: a free tier typically documents a
+    tokens-per-minute limit alongside its requests-per-minute limit, while a
+    local runtime has neither in any meaningful sense. None disables token
+    accounting for that provider; the request budget still applies.
+    """
 
     name: str
     base_url: str
     api_key_env: str
     rpm_budget: int
+    tpm_budget: int | None = None
 
 
 @dataclass(frozen=True)
@@ -83,11 +91,13 @@ def _parse_providers(raw: dict) -> dict[str, ProviderConfig]:
         for key in ("base_url", "api_key_env", "rpm_budget"):
             if key not in spec:
                 raise ConfigError(f"providers.{name} is missing required key '{key}'")
+        tpm_raw = spec.get("tpm_budget")
         providers[name] = ProviderConfig(
             name=name,
             base_url=spec["base_url"],
             api_key_env=spec["api_key_env"],
             rpm_budget=int(spec["rpm_budget"]),
+            tpm_budget=int(tpm_raw) if tpm_raw is not None else None,
         )
     return providers
 

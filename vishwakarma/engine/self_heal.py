@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from vishwakarma.engine.calling import OnEvent, call_role, noop_event
 from vishwakarma.engine.executor import ExecutionResult, run_tests, write_files
 from vishwakarma.engine.generate import FileSpec, GenerationError, request_files_from_coder
+from vishwakarma.engine.personas import persona_for_role
 from vishwakarma.engine.reasoning_utils import strip_reasoning_trace
 from vishwakarma.llm_client import LLMClient
 from vishwakarma.plugins import SubAgent
@@ -113,9 +114,10 @@ def _diagnose(
         The reasoner's final diagnosis/fix guidance, with any <think> trace
         stripped so only the answer is fed to the coder.
     """
+    reasoner_persona = persona_for_role(subagent, "reasoner", on_event)
     system_prompt = (
-        subagent.system_prompt
-        if subagent is not None and subagent.role == "reasoner"
+        reasoner_persona.system_prompt
+        if reasoner_persona is not None
         else "You are diagnosing why generated code failed its own tests. "
         "State the root cause, then the exact fix needed."
     )
@@ -193,9 +195,10 @@ def heal(
             task, current_files, current_result, history, router, client, reasoner_subagent, on_event
         )
 
+        coder_persona = persona_for_role(coder_subagent, "primary_coder", on_event)
         system_prompt = (
-            coder_subagent.system_prompt
-            if coder_subagent is not None and coder_subagent.role == "primary_coder"
+            coder_persona.system_prompt
+            if coder_persona is not None
             else "You are fixing code that failed its own tests based on a diagnosis."
         )
         system_prompt += (

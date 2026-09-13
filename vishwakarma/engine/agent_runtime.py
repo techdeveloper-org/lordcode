@@ -209,12 +209,54 @@ class AgentCoordinator:
         self._spawn_times[agent_id] = started
         return process, agent_id
 
+    def run_agent(self, persona_fn: Callable[..., Any], args: tuple[Any, ...]) -> Any:
+        """Spawn one agent, drain its result, THEN join it. Returns the result.
+
+        This is the correct single-spawn primitive and the one every caller
+        should use. Spawning and then calling `process.join()` before
+        `await_result` -- which is what 20 call sites did before issue #2 --
+        is the same deadlock run_agents_parallel documents at length below,
+        just with one child instead of several: the child blocks inside its
+        Queue feeder thread once the OS pipe buffer fills, while the parent
+        blocks in join() waiting for a child that cannot exit until somebody
+        drains the queue. Draining first unblocks the feeder thread, so the
+        subsequent join() returns immediately.
+
+        The single-child case is easy to get away with in testing because a
+        small payload fits entirely in the pipe buffer and never blocks --
+        which is precisely why the defect survived a green test suite. It
+        appears only when a payload grows past the buffer, i.e. in exactly
+        the generated-code and assembled-document cases this engine exists
+        to produce.
+
+        Args:
+            persona_fn: Module-level function run in the child process; its
+                first parameter receives a RemoteLLM.
+            args: Extra positional arguments for persona_fn, all picklable.
+
+        Returns:
+            Whatever persona_fn returned.
+
+        Raises:
+            RuntimeError: If the agent process raised; the child's error text
+                is propagated.
+        """
+        process, agent_id = self.spawn_agent(persona_fn, args)
+        try:
+            return self._await_result(agent_id)
+        finally:
+            process.join()
+
     def await_result(self, agent_id: str) -> Any:
         """Block until agent_id's spawned process has a result, then return it.
 
         Public so callers needing branching logic (e.g. run_task's bounded
         2-round consensus loop) can spawn/await one stage at a time instead
         of going through run_agents_pipeline's straight-line chain shape.
+
+        Prefer run_agent() for the common spawn-one-and-wait case: it cannot
+        be called in the deadlocking order, whereas this method relies on the
+        caller remembering to drain before joining.
         """
         return self._await_result(agent_id)
 
@@ -242,9 +284,7 @@ class AgentCoordinator:
         result: Any = None
         for persona_fn, args_builder in specs:
             args = args_builder(result)
-            process, agent_id = self.spawn_agent(persona_fn, args)
-            process.join()
-            result = self._await_result(agent_id)
+            result = self.run_agent(persona_fn, args)
         return result
 
     def run_agents_parallel(self, specs: list[AgentSpec]) -> dict[str, Any]:
