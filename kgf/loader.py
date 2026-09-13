@@ -1,7 +1,7 @@
 """Build a KnowledgeGraph from the five master registries.
 
 No disk cache, deliberately. Reading all five registries with json.load takes
-about 80ms warm, which already beats the 300ms budget by more than 3x, so a
+about 0.18s warm for the build, which beats the 300ms budget, so a
 cache would add an invalidation failure class to solve a problem that does not
 exist. An earlier draft proposed one keyed on kg_version -- which would not
 even have worked, since that field is `1.0.0` in every registry and never
@@ -227,6 +227,11 @@ def cached_graph(root: str | None = None) -> tuple[KnowledgeGraph, ProblemLog]:
 
     Keyed on the root string so a test pointing at a fixture library does not
     collide with the real one. There is no disk cache and no invalidation to
-    get wrong -- a fresh process re-reads, which costs about 80ms.
+    get wrong -- a fresh process re-reads, which costs about 0.28s: roughly
+    0.11s to import the package and 0.18s to build. The figure here said 80ms
+    until M13 measured a cold process rather than a json.load, which is what
+    ADR-4's 80ms actually timed. The distinction matters now that the MCP
+    surface pays this per server: a four-server compose spends about 1.1s on
+    it.
     """
     return load_graph(root)

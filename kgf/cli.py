@@ -7,6 +7,9 @@ of whatever consumes it.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -17,6 +20,10 @@ from kgf.closure import build_closure
 from kgf.context import DEFAULT_TOKEN_BUDGET, Intent, assemble_context
 from kgf.errors import LibraryNotFoundError, ProblemLog, Severity
 from kgf import manifest as manifest_module
+from kgf.mcp import server_path as mcp_server_path
+from kgf.mcp import settings_path as mcp_settings_path
+from kgf.mcp.registry import registry as mcp_registry
+from kgf.mcp.settings import load_settings as mcp_load_settings
 from kgf.loader import load_graph
 from kgf.patterns import load_decision_tree
 from kgf.roles import classify
@@ -456,7 +463,7 @@ def topology(
 
 @app.command()
 def replay(
-    manifest_file: Path = typer.Argument(..., help="A manifest written by --manifest."),
+    manifest_files: list[Path] = typer.Argument(..., help="One manifest, or several fragments to merge."),
     library: Path = _LIBRARY_OPTION,
 ) -> None:
     """Re-derive a recorded run from the current library and report what changed.
@@ -465,17 +472,32 @@ def replay(
     reads markdown, so a replay is disk and arithmetic. Exits non-zero when
     anything differs, which is what makes it usable as a drift gate rather than
     something a human has to read and compare by eye.
+
+    Several paths are merged first. A compose over the MCP surface produces one
+    FRAGMENT per server -- four stdio processes share no run -- so the pieces
+    arrive separately and are stitched here. Merging refuses a set whose
+    registry digests disagree, and also one whose correlation ids disagree:
+    two fragments from different composes against the same library agree on
+    every digest and would otherwise merge into a decision nobody made.
     """
-    if not manifest_file.is_file():
-        typer.secho(f"no manifest at {manifest_file}", fg=typer.colors.RED, err=True)
+    missing = [path for path in manifest_files if not path.is_file()]
+    if missing:
+        typer.secho(
+            f"no manifest at {', '.join(str(path) for path in missing)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
         raise typer.Exit(code=2)
 
     try:
-        recorded = manifest_module.load(manifest_file)
+        fragments = [manifest_module.load(path) for path in manifest_files]
+        recorded = fragments[0] if len(fragments) == 1 else manifest_module.merge(fragments)
     except (ValueError, TypeError) as exc:
-        typer.secho(f"{manifest_file} is not a readable manifest: {exc}", fg=typer.colors.RED, err=True)
+        label = ", ".join(str(path) for path in manifest_files)
+        typer.secho(f"{label} is not a readable manifest: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
 
+    manifest_file = manifest_files[0] if len(manifest_files) == 1 else f"{len(manifest_files)} fragments merged"
     typer.echo(f"manifest:        {manifest_file}")
     typer.echo(f"written:         {recorded.created_at}")
     typer.echo(f"schema:          v{recorded.manifest_version}")
@@ -494,6 +516,102 @@ def replay(
         return
     typer.secho(report.summary(), fg=typer.colors.YELLOW, err=True)
     raise typer.Exit(code=1)
+
+
+mcp_app = typer.Typer(help="kgf's own MCP surface: four stdio servers over the knowledge graph.")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("list")
+def mcp_list() -> None:
+    """List the four servers, their tools, and the CURRENT posture.
+
+    The posture is shown because "is Bash reachable right now?" should be
+    answerable without reading code or guessing at a config file's contents.
+    """
+    registry = mcp_registry()
+    settings = mcp_load_settings(create=False)
+
+    typer.echo(f"surface_version  {registry.get('surface_version', '?')}")
+    typer.echo("posture:")
+    typer.echo(settings.describe())
+    typer.echo("")
+
+    for name, spec in registry["servers"].items():
+        marker = "read-only" if spec["read_only"] else "MUTATING"
+        typer.echo(f"{name}  [{marker}]")
+        typer.echo(f"  {spec['summary']}")
+        typer.echo(f"  tools: {', '.join(spec['tools'])}")
+        typer.echo(f"  launch: {sys.executable} {mcp_server_path(name)}")
+        typer.echo("")
+
+    if not settings.has_sandbox:
+        typer.secho(
+            "no sandbox_root configured, so kgf_tool_call's filesystem tools cannot run. "
+            f"Set it in {mcp_settings_path()}.",
+            fg=typer.colors.YELLOW,
+        )
+
+
+@mcp_app.command("config")
+def mcp_config(server: str = typer.Argument("", help="One server, or omit for all four.")) -> None:
+    """Print a launch block for any MCP client, on stdout only.
+
+    kgf never writes another client's settings file -- `~/.claude/settings.json`
+    included. Whoever runs this decides where the output goes, which is the
+    whole of ADR-9's "its own settings" in practice.
+
+    The block carries the command and the server name and NO posture flags.
+    Emitting `env: {KGF_MCP_ALLOW_BASH: "0"}` would hand every reader the exact
+    string that flips the control, and a config example is the first thing
+    anyone copies.
+    """
+    registry = mcp_registry()
+    names = [server] if server else list(registry["servers"])
+    unknown = [name for name in names if name not in registry["servers"]]
+    if unknown:
+        typer.secho(
+            f"unknown server {', '.join(unknown)}; known: {', '.join(registry['servers'])}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    block = {
+        name: {"command": sys.executable, "args": [str(mcp_server_path(name))]}
+        for name in names
+    }
+    typer.echo(json.dumps({"mcpServers": block}, indent=2))
+    typer.echo("")
+    typer.secho(
+        f"# posture is read from {mcp_settings_path()} at launch, not from this block",
+        fg=typer.colors.BRIGHT_BLACK,
+    )
+
+
+@mcp_app.command("serve")
+def mcp_serve(
+    server: str = typer.Argument(..., help="kgf-graph | kgf-selection | kgf-context | kgf-tools"),
+    settings: Path = typer.Option(None, "--settings", help="Posture file (default: ~/.kgf/mcp.json)."),
+) -> None:
+    """Run one server on stdio in this process.
+
+    Mostly a convenience for launching by name rather than by path; a client
+    normally spawns the module directly, which is what `kgf mcp config` emits.
+    """
+    registry = mcp_registry()
+    if server not in registry["servers"]:
+        typer.secho(
+            f"unknown server {server!r}; known: {', '.join(registry['servers'])}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    argv = [sys.executable, str(mcp_server_path(server))]
+    if settings is not None:
+        argv += ["--settings", str(settings)]
+    raise typer.Exit(code=subprocess.call(argv))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,58 @@
+{
+  "$comment": [
+    "kgf's OWN MCP server registry (ADR-9). Not a Claude Code registration:",
+    "nothing here is written to ~/.claude/settings.json, and kgf never writes",
+    "any client's settings file. `kgf mcp config` prints a launch block on",
+    "stdout and whoever runs it decides where it goes.",
+    "Paths are resolved from the INSTALLED package location, not from a",
+    "workspace root, so this registry survives an install outside the repo.",
+    "Posture (sandbox root, allow_bash, allow_network) is NOT here. It lives",
+    "in ~/.kgf/mcp.json, because a registry is shared and a posture is local."
+  ],
+  "surface_version": "1",
+  "servers": {
+    "kgf-graph": {
+      "module": "graph_server.py",
+      "read_only": true,
+      "summary": "What the library says, and whether it is still the same library.",
+      "tools": [
+        "kgf_stats",
+        "kgf_agent",
+        "kgf_skill",
+        "kgf_validate",
+        "kgf_fingerprint",
+        "kgf_replay"
+      ]
+    },
+    "kgf-selection": {
+      "module": "selection_server.py",
+      "read_only": true,
+      "summary": "What work should run, and who should do it. No model call.",
+      "tools": [
+        "kgf_route",
+        "kgf_closure",
+        "kgf_role",
+        "kgf_pattern",
+        "kgf_topology"
+      ]
+    },
+    "kgf-context": {
+      "module": "context_server.py",
+      "read_only": true,
+      "summary": "What text to send, and what was left out.",
+      "tools": [
+        "kgf_context",
+        "kgf_sections"
+      ]
+    },
+    "kgf-tools": {
+      "module": "tools_server.py",
+      "read_only": false,
+      "summary": "What may touch the disk. The only mutating surface; Bash and network off by default.",
+      "tools": [
+        "kgf_grant",
+        "kgf_tool_call"
+      ]
+    }
+  }
+}
