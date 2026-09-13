@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,12 +15,44 @@ TEST_TIMEOUT_SECONDS = 120
 
 @dataclass(frozen=True)
 class ExecutionResult:
-    """The outcome of one test run: pass/fail plus captured output."""
+    """The outcome of one test run: pass/fail plus captured output.
+
+    `runner_missing` separates an environment fault from a test failure.
+    Without it the two are indistinguishable, and self-heal spent three
+    diagnose-and-regenerate attempts -- real model calls, minutes of pacing
+    each at this repo's ~6000 TPM -- trying to fix code for a runner that was
+    never on PATH (issue #17).
+    """
 
     passed: bool
     stdout: str
     stderr: str
     returncode: int
+    runner_missing: bool = False
+
+
+def resolve_runner(program: str) -> str | None:
+    """Resolve a test runner's name to an executable path, or None if absent.
+
+    `shutil.which` is what makes a Windows runner work at all. Maven and npm
+    ship their entry points as `mvn.cmd` and `npm.cmd`, and CreateProcess will
+    not start a batch file from a bare name, so `subprocess.run(["mvn", ...])`
+    with shell=False raises WinError 2 even when Maven is installed and on
+    PATH -- measured here with Maven 3.9.9 present, where `["mvn", "-v"]`
+    raised and `["mvn.cmd", "-v"]` returned 0 (issue #17). `which` consults
+    PATHEXT and returns the real name.
+
+    shell=True would also "work" and is not used: it would reintroduce the
+    injection surface that passing argv exists to avoid, for every language
+    adapter at once.
+
+    An absolute path is returned unchanged when it exists, which keeps the
+    Python adapter's `sys.executable` untouched.
+    """
+    candidate = Path(program)
+    if candidate.is_absolute():
+        return program if candidate.is_file() else None
+    return shutil.which(program)
 
 
 def write_files(workdir: Path, files: list[FileSpec]) -> None:
@@ -47,7 +80,22 @@ def run_tests(workdir: Path, language: str) -> ExecutionResult:
         surfaced as a failed run rather than an unhandled exception.
     """
     adapter = get_adapter(language)
-    argv = adapter.test_command(workdir)
+    argv = list(adapter.test_command(workdir))
+
+    resolved = resolve_runner(argv[0])
+    if resolved is None:
+        return ExecutionResult(
+            passed=False,
+            stdout="",
+            stderr=(
+                f"Test runner {argv[0]!r} for '{language}' was not found on PATH. "
+                "Install it, or add it to PATH, and run again -- no amount of code "
+                "regeneration can fix this."
+            ),
+            returncode=-1,
+            runner_missing=True,
+        )
+    argv[0] = resolved
 
     try:
         completed = subprocess.run(
@@ -72,6 +120,7 @@ def run_tests(workdir: Path, language: str) -> ExecutionResult:
             stdout="",
             stderr=f"Test runner not found for '{language}': {exc}",
             returncode=-1,
+            runner_missing=True,
         )
 
     return ExecutionResult(

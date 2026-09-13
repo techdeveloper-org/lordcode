@@ -184,6 +184,20 @@ def heal(
     current_files = files
     current_result = result
 
+    if result.runner_missing:
+        on_event(
+            {
+                "type": "heal_refused",
+                "reason": "the test runner is missing, which no code change can fix",
+                "detail": result.stderr,
+            }
+        )
+        return HealResult(
+            final_files=files,
+            passed=False,
+            attempts=[AttemptRecord(attempt=0, files=files, result=result)],
+        )
+
     for attempt in range(1, max_attempts + 1):
         if time.monotonic() - started_at > timeout_seconds:
             on_event({"type": "heal_timeout", "attempt": attempt})
