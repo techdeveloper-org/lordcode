@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import pickle
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -577,6 +577,37 @@ class RunReport:
         }
 
 
+UPSTREAM_KEY = "upstream"
+"""Where a node finds its dependencies' completed values in its own state."""
+
+
+def _with_upstream(spec: NodeSpec, edges: Edges, report: RunReport) -> NodeSpec:
+    """Inject the completed values of a spec's dependencies into its state.
+
+    Without this a node cannot see what it depends on: NodeSpec.state is
+    frozen at construction, so a consensus phase could not receive the
+    blueprint the architecture phase produced. Injected rather than passed as
+    a second argument so the ExecutorPort signature stays as it is -- a spec
+    remains the single unit a level's executor has to move, which matters
+    because that unit is pickled and shipped to a child process.
+
+    A spec that declares no dependency is returned unchanged, so the common
+    case allocates nothing.
+    """
+    dependencies = tuple(edges.get(spec.label, ()))
+    if not dependencies:
+        return spec
+    upstream = {
+        dependency: report.results[dependency].value
+        for dependency in dependencies
+        if dependency in report.results
+        and report.results[dependency].outcome is Outcome.COMPLETED
+    }
+    if not upstream:
+        return spec
+    return replace(spec, state={**spec.state, UPSTREAM_KEY: upstream})
+
+
 def _classify(value: Any) -> FailureClass | None:
     """The failure class of a run_level value, or None if it succeeded."""
     if isinstance(value, NodeFailure):
@@ -644,6 +675,8 @@ def run_dag(
 
         if not runnable:
             continue
+
+        runnable = [_with_upstream(spec, edges, report) for spec in runnable]
 
         if tpm_budget:
             cap = level_cap(runnable, tpm_budget, on_warning=note)

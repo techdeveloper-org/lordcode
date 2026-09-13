@@ -397,3 +397,72 @@ class TestTheRealTopology:
         ran_at = {label: index for index, label in enumerate(CALL_LOG)}
         assert ran_at["phase:A.5"] < ran_at["phase:B"]
         assert ran_at["phase:D"] < ran_at["phase:F.1"]
+
+
+UPSTREAM_SEEN: dict[str, dict] = {}
+
+
+def upstream_reading_node(spec: NodeSpec):
+    """Record what this node could see of its dependencies, then succeed."""
+    CALL_LOG.append(spec.label)
+    UPSTREAM_SEEN[spec.label] = dict(spec.state.get("upstream", {}))
+    return f"{spec.label}:done"
+
+
+class TestUpstreamValues:
+    """A node must be able to see what it depends on.
+
+    Without this the DAG can order work but not connect it: NodeSpec.state is
+    frozen at construction, so a consensus phase could not receive the
+    blueprint an architecture phase produced.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _register(self):
+        UPSTREAM_SEEN.clear()
+        register_node_type("reader", upstream_reading_node)
+        yield
+
+    def test_a_dependent_sees_its_dependency_value(self):
+        run_dag(
+            [spec("a"), spec("b", "reader")],
+            {"b": {"a"}},
+            InProcessExecutor(),
+        )
+        assert UPSTREAM_SEEN["b"] == {"a": "a:done"}
+
+    def test_a_node_with_no_dependencies_gets_no_upstream_key(self):
+        run_dag([spec("a", "reader")], {}, InProcessExecutor())
+        assert UPSTREAM_SEEN["a"] == {}
+
+    def test_every_dependency_is_present_not_just_one(self):
+        run_dag(
+            [spec("a"), spec("b"), spec("c", "reader")],
+            {"c": {"a", "b"}},
+            InProcessExecutor(),
+        )
+        assert UPSTREAM_SEEN["c"] == {"a": "a:done", "b": "b:done"}
+
+    def test_only_completed_dependencies_are_injected(self):
+        """A skipped or failed dependency contributes nothing rather than a
+        None that a node would have to distinguish from a real value."""
+        run_dag(
+            [spec("a"), spec("bad", "permanent"), spec("c", "reader")],
+            {"c": {"a"}},
+            InProcessExecutor(),
+        )
+        assert UPSTREAM_SEEN["c"] == {"a": "a:done"}
+
+    def test_injection_does_not_mutate_the_caller_s_spec(self):
+        original = spec("b", "reader")
+        run_dag([spec("a"), original], {"b": {"a"}}, InProcessExecutor())
+        assert "upstream" not in original.state
+
+    def test_the_injected_state_survives_a_retry(self):
+        run_dag(
+            [spec("a"), spec("b", "flaky")],
+            {"b": {"a"}},
+            InProcessExecutor(),
+            transient_retries=1,
+        )
+        assert CALL_LOG == ["a", "b", "b"]
