@@ -21,6 +21,7 @@ from kgf.patterns import load_decision_tree
 from kgf.roles import classify
 from kgf.select import Selector
 from kgf.source import locate_library
+from kgf.tools import grant_for
 from kgf.validate import summarize, validate_graph, validate_markdown
 
 app = typer.Typer(help="Inspect and validate claude-global-library's knowledge graph.")
@@ -201,6 +202,43 @@ def closure(
             f"  truncated {len(result.truncated)} skill(s) at the closure ceiling",
             fg=typer.colors.YELLOW,
         )
+
+
+@app.command()
+def tools(
+    agent_name: str = typer.Argument(..., help="Agent slug or id."),
+    library: Path = _LIBRARY_OPTION,
+    with_closure: bool = typer.Option(
+        True, "--closure/--no-closure", help="Apply closure-wide narrowing."
+    ),
+) -> None:
+    """Show an agent's effective tool grant, how it was derived, and any defects."""
+    graph, _log = _load(library)
+    record = graph.agent(agent_name)
+    if record is None:
+        typer.secho(f"no agent matching {agent_name!r}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    agent_closure = build_closure(graph, record.id) if with_closure else None
+    grant = grant_for(graph, record.id, closure=agent_closure)
+
+    typer.echo(f"{grant.agent}")
+    typer.echo(f"  ceiling (agent `tools`): {', '.join(sorted(grant.ceiling)) or '(none)'}")
+    typer.echo(f"  tiers:                   {', '.join(grant.tiers) or '(none)'}")
+    typer.echo(f"  effective grant:         {', '.join(grant.sorted_tools()) or '(empty)'}")
+    withheld = sorted(grant.ceiling - grant.tools)
+    if withheld:
+        typer.echo(f"  withheld by narrowing:   {', '.join(withheld)}")
+    for step in grant.narrowed_by:
+        typer.echo(f"  narrowed by: {step}")
+    for defect in grant.defects:
+        typer.secho(f"  ! {defect}", fg=typer.colors.YELLOW)
+
+    typer.echo("")
+    typer.echo("Sandbox posture for this grant (both flags default to False):")
+    typer.echo(f"  Bash granted:     {grant.permits('Bash')}  -- requires allow_bash=True to run")
+    typer.echo(f"  network granted:  {grant.permits('WebFetch') or grant.permits('WebSearch')}"
+               f"  -- requires allow_network=True to run")
 
 
 @app.command()
