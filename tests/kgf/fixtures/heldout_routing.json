@@ -1,0 +1,326 @@
+{
+  "$comment": [
+    "FROZEN held-out evaluation set for kgf agent/domain selection.",
+    "",
+    "Authored 2026-09-13 against library_version 29.97.4, BEFORE any ranker",
+    "existed in kgf. That ordering is the point: a set written or adjusted after",
+    "tuning measures curve-fitting, not accuracy. Do not add, remove or relabel",
+    "a case to make a ranker look better. If a label is genuinely wrong, fix it",
+    "in a commit that changes NO ranker code, and say why.",
+    "",
+    "Labels are sets of acceptable domains, not single answers, because several",
+    "of these tasks legitimately sit on a boundary (a slow query is arguably",
+    "backend or database work). A case with one acceptable domain is a case where",
+    "any other answer is wrong.",
+    "",
+    "Three categories, chosen to include the classes that fail today:",
+    "  proper-noun  - names a framework or product. The easy class, and the only",
+    "                 one the existing reference implementation reliably gets",
+    "                 right: dropping 'spring boot' from a task moved it from",
+    "                 spring-boot-microservices to figma-automation-engineer.",
+    "  plain-english- no proper noun at all. The class that fails today.",
+    "  no-description- the best skill is one of the 134 skills with NO description,",
+    "                 where a lexical ranker has only name + domain to weigh. This",
+    "                 is the trigger condition for revisiting the no-embeddings",
+    "                 decision, so it has to be measurable."
+  ],
+  "provenance": {
+    "authored": "2026-09-13",
+    "library_version": "29.97.4",
+    "authored_before_ranker": true,
+    "n": 33
+  },
+  "baseline": {
+    "$comment": [
+      "Measured 2026-09-12 against claude-workflow-engine's selection/ package",
+      "at library_version 29.97.4, using load_catalogue + build_lexicon +",
+      "DomainKgAdapter + RiskSignal.unavailable(), complexity=8, limit=3.",
+      "",
+      "Recorded because it is the bar kgf must beat, and because neither figure",
+      "was re-derived during plan review -- so its provenance is pinned here",
+      "rather than quoted from memory. 8 tasks, 4 correct top-1 domains.",
+      "",
+      "The confidence pair is the justification for the calibration criterion:",
+      "a wrong answer scored 0.776 while a correct one scored 0.835. Those",
+      "populations overlap, so a low_confidence state keyed on score alone could",
+      "never fire."
+    ],
+    "source": "claude-workflow-engine/langgraph_engine/selection",
+    "measured": "2026-09-12",
+    "library_version": "29.97.4",
+    "top1_correct": 4,
+    "top1_total": 8,
+    "top1_accuracy": 0.5,
+    "example_correct_confidence": 0.835,
+    "example_wrong_confidence": 0.776
+  },
+  "kgf_result": {
+    "$comment": [
+      "Measured 2026-09-13 at library_version 29.97.4. Recorded here so the",
+      "figure has provenance rather than living in a commit message.",
+      "",
+      "HONEST CAVEAT: the ranker was developed with this set visible, so 54.5%",
+      "is optimistic for unseen tasks. What guards against having simply fitted",
+      "33 cases is that no label was changed, no per-case rule exists, and each",
+      "design decision was made on a diagnosed mechanism -- the one change that",
+      "mattered most was fixing an ordering bug, and the one plausible-sounding",
+      "addition (a coverage factor on the agent score) was MEASURED, found to",
+      "hurt, and reverted.",
+      "",
+      "Three scoring designs were compared -- enriched agent documents,",
+      "skills-primary aggregation, and skills-primary plus a domain signal -- and",
+      "all three landed within a few points of each other while plain-english",
+      "stayed at 3-4 of 15. The ceiling is a property of this corpus, not of the",
+      "formula: the vocabulary that separates domains ('endpoint', 'repository',",
+      "'cache') is spread across many domains' skill text.",
+      "",
+      "The no-description category was PREDICTED to be the hardest and is now",
+      "the second strongest, because all 134 of those skills do have a markdown",
+      "description that the registry build dropped. Reading the markdown fixed a",
+      "class that embeddings were being reserved for."
+    ],
+    "measured": "2026-09-13",
+    "library_version": "29.97.4",
+    "top1_correct": 18,
+    "top1_total": 33,
+    "top1_accuracy": 0.545,
+    "top3_correct": 20,
+    "top3_accuracy": 0.606,
+    "by_category_top1": {
+      "proper-noun": "8/10",
+      "no-description": "6/8",
+      "plain-english": "4/15"
+    },
+    "calibration": {
+      "mean_confidence_correct": 0.43,
+      "mean_confidence_wrong": 0.359,
+      "gap": 0.071
+    },
+    "embedding_trigger": {
+      "$comment": [
+        "The plan gates embeddings behind three numeric triggers. Two fire on",
+        "this measurement, so revisiting the lexical-only decision is now a",
+        "documented, evidence-backed option rather than a preference.",
+        "",
+        "Trigger 1 (top-3 below 75%): FIRES at 60.6%.",
+        "Trigger 2 (>=3 misses among description-less skills): does NOT fire --",
+        "  6 of 8 now correct, because the markdown backfill removed the cause.",
+        "Trigger 3 (>=3 misses where disambiguation edges were consulted and",
+        "  still lost): FIRES -- 11 of 15 plain-english cases."
+      ],
+      "trigger_1_top3_below_75pct": true,
+      "trigger_2_description_less_misses": false,
+      "trigger_3_plain_english_misses": true
+    }
+  },
+  "cases": [
+    {
+      "id": "pn-01",
+      "category": "proper-noun",
+      "task": "add a REST endpoint for creating an order in Spring Boot",
+      "acceptable_domains": ["backend-engineering"],
+      "note": "The reference implementation gets this right at 0.835. Dropping the proper noun is pe-01."
+    },
+    {
+      "id": "pn-02",
+      "category": "proper-noun",
+      "task": "build a React component that shows a paginated user list",
+      "acceptable_domains": ["frontend-engineering"]
+    },
+    {
+      "id": "pn-03",
+      "category": "proper-noun",
+      "task": "write a Dockerfile and a Kubernetes deployment manifest for the service",
+      "acceptable_domains": ["devops-cloud"]
+    },
+    {
+      "id": "pn-04",
+      "category": "proper-noun",
+      "task": "write a Solidity contract that holds escrow payments until both parties confirm",
+      "acceptable_domains": ["solidity-engineering", "defi-blockchain"]
+    },
+    {
+      "id": "pn-05",
+      "category": "proper-noun",
+      "task": "build a Flutter screen with a bottom navigation bar and three tabs",
+      "acceptable_domains": ["dart-flutter-engineering", "mobile-engineering"]
+    },
+    {
+      "id": "pn-06",
+      "category": "proper-noun",
+      "task": "write a Terraform module for an S3 bucket with versioning enabled",
+      "acceptable_domains": ["devops-cloud"]
+    },
+    {
+      "id": "pn-07",
+      "category": "proper-noun",
+      "task": "create a Figma plugin that exports the design tokens to CSS variables",
+      "acceptable_domains": ["figma-automation", "ui-ux-design"]
+    },
+    {
+      "id": "pn-08",
+      "category": "proper-noun",
+      "task": "compile a Rust crate to WebAssembly and call it from the browser",
+      "acceptable_domains": ["webassembly-systems-engineering", "systems-programming"]
+    },
+    {
+      "id": "pn-09",
+      "category": "proper-noun",
+      "task": "write a PySpark job that aggregates the daily event stream",
+      "acceptable_domains": ["data-science", "distributed-systems-database-engineering"]
+    },
+    {
+      "id": "pn-10",
+      "category": "proper-noun",
+      "task": "add a Prometheus metric and a Grafana dashboard panel for request latency",
+      "acceptable_domains": ["sre-production-operations", "devops-cloud"]
+    },
+    {
+      "id": "pe-01",
+      "category": "plain-english",
+      "task": "add an endpoint that creates an order and returns its identifier",
+      "acceptable_domains": ["backend-engineering"],
+      "note": "pn-01 with the proper noun removed. The reference implementation answers figma-automation-engineer here."
+    },
+    {
+      "id": "pe-02",
+      "category": "plain-english",
+      "task": "the list page is slow because every row triggers its own query",
+      "acceptable_domains": ["backend-engineering", "distributed-systems-database-engineering", "architecture-quality"]
+    },
+    {
+      "id": "pe-03",
+      "category": "plain-english",
+      "task": "make the login form show a validation message underneath each field",
+      "acceptable_domains": ["frontend-engineering", "ui-ux-design"]
+    },
+    {
+      "id": "pe-04",
+      "category": "plain-english",
+      "task": "write unit tests for the order repository including its failure cases",
+      "acceptable_domains": ["quality-testing"]
+    },
+    {
+      "id": "pe-05",
+      "category": "plain-english",
+      "task": "the service runs out of memory after a few hours under load, find the leak",
+      "acceptable_domains": ["sre-production-operations", "systems-programming", "architecture-quality"]
+    },
+    {
+      "id": "pe-06",
+      "category": "plain-english",
+      "task": "add retries with exponential backoff to the outbound HTTP calls",
+      "acceptable_domains": ["backend-engineering", "sre-production-operations"]
+    },
+    {
+      "id": "pe-07",
+      "category": "plain-english",
+      "task": "encrypt the stored customer identifiers so they are unreadable at rest",
+      "acceptable_domains": ["cybersecurity", "security-governance"]
+    },
+    {
+      "id": "pe-08",
+      "category": "plain-english",
+      "task": "batch the outgoing notifications so each user gets at most one per hour",
+      "acceptable_domains": ["backend-engineering"]
+    },
+    {
+      "id": "pe-09",
+      "category": "plain-english",
+      "task": "make every page usable with only a keyboard and a screen reader",
+      "acceptable_domains": ["ui-ux-design", "frontend-engineering"]
+    },
+    {
+      "id": "pe-10",
+      "category": "plain-english",
+      "task": "translate the whole interface into Hindi and Tamil including plural forms",
+      "acceptable_domains": ["i18n-l10n-engineering", "india-dpi-indic-language-engineering"]
+    },
+    {
+      "id": "pe-11",
+      "category": "plain-english",
+      "task": "the build takes twenty minutes, work out what to cache and make it faster",
+      "acceptable_domains": ["devops-cloud", "code-quality-static-analysis", "sre-production-operations"]
+    },
+    {
+      "id": "pe-12",
+      "category": "plain-english",
+      "task": "detect when two people edit the same record at once and refuse the stale write",
+      "acceptable_domains": ["distributed-systems-database-engineering", "backend-engineering"]
+    },
+    {
+      "id": "pe-13",
+      "category": "plain-english",
+      "task": "draw the class and sequence diagrams for the checkout flow",
+      "acceptable_domains": ["uml-diagram-engineering", "architecture-quality"]
+    },
+    {
+      "id": "pe-14",
+      "category": "plain-english",
+      "task": "work out why the model confidently returns facts that are not in the source documents",
+      "acceptable_domains": ["anti-hallucination", "aiml", "foundation-model"]
+    },
+    {
+      "id": "pe-15",
+      "category": "plain-english",
+      "task": "reverse engineer this stripped binary and describe what it does on startup",
+      "acceptable_domains": ["reverse-engineering", "cryptanalysis"]
+    },
+    {
+      "id": "nd-01",
+      "category": "no-description",
+      "task": "implement a self-balancing binary search tree with deletion and prove the height bound",
+      "acceptable_domains": ["architecture-quality"],
+      "best_skill_without_description": "dsa-core"
+    },
+    {
+      "id": "nd-02",
+      "category": "no-description",
+      "task": "compute probability of default for a loan book and stage it under IFRS 9",
+      "acceptable_domains": ["finance"],
+      "best_skill_without_description": "credit-risk-core"
+    },
+    {
+      "id": "nd-03",
+      "category": "no-description",
+      "task": "price a European call option against a volatility surface",
+      "acceptable_domains": ["finance"],
+      "best_skill_without_description": "derivatives-pricing-core"
+    },
+    {
+      "id": "nd-04",
+      "category": "no-description",
+      "task": "write the bare-metal startup routine that sets up the stack and clears BSS",
+      "acceptable_domains": ["embedded-firmware-kernel", "assembly-boot"],
+      "best_skill_without_description": "bare-metal-architecture-core"
+    },
+    {
+      "id": "nd-05",
+      "category": "no-description",
+      "task": "model how an outbreak spreads through a population with waning immunity",
+      "acceptable_domains": ["healthcare"],
+      "best_skill_without_description": "epidemiology-modeling-core"
+    },
+    {
+      "id": "nd-06",
+      "category": "no-description",
+      "task": "estimate the true effect of the treatment when assignment was not random",
+      "acceptable_domains": ["data-science"],
+      "best_skill_without_description": "causal-inference-core"
+    },
+    {
+      "id": "nd-07",
+      "category": "no-description",
+      "task": "build a screening rule set that flags suspicious transaction structuring",
+      "acceptable_domains": ["finance"],
+      "best_skill_without_description": "aml-fraud-detection-core"
+    },
+    {
+      "id": "nd-08",
+      "category": "no-description",
+      "task": "work out the sample size needed to detect that effect with adequate power",
+      "acceptable_domains": ["healthcare", "data-science"],
+      "best_skill_without_description": "biostatistics-core"
+    }
+  ]
+}

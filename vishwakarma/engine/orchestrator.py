@@ -33,17 +33,30 @@ from vishwakarma.engine import generate as generate_module
 from vishwakarma.engine import parallel_generate
 from vishwakarma.engine import rag
 from vishwakarma.engine import self_heal as self_heal_module
+from vishwakarma.engine import knowledge
 from vishwakarma.engine.agent_runtime import AgentCoordinator, RemoteLLM
 from vishwakarma.engine.calling import OnEvent, call_role, noop_event
+from vishwakarma.engine.dag_executor import (
+    SPAWN_KEY,
+    UPSTREAM_KEY,
+    CoordinatorExecutor,
+    FailureClass,
+    Outcome,
+    NodeFailure,
+    NodeSpec,
+    Phase,
+    Topology,
+    run_dag,
+)
 from vishwakarma.engine.executor import ExecutionResult, run_tests, write_files
 from vishwakarma.engine.generate import FileSpec, GeneratedArtifact, GenerationError
-from vishwakarma.engine.kg_routing import route_persona
 from vishwakarma.engine.personas import persona_for_role
 from vishwakarma.engine.reasoning_utils import strip_reasoning_trace
 from vishwakarma.engine.self_heal import AttemptRecord, HealResult
 from vishwakarma.languages import available_languages
+from vishwakarma.config import ConfigError
 from vishwakarma.llm_client import LLMClient
-from vishwakarma.plugins import SubAgent, get_agent, load_all_agents, load_all_skills, match_skill
+from vishwakarma.plugins import SubAgent, load_all_skills
 from vishwakarma.router import Router
 
 DEFAULT_LANGUAGE = "python"
@@ -510,6 +523,279 @@ def _persona_consensus_review(
     return approved, text
 
 
+PHASE_ARCHITECTURE = "phase:A"
+PHASE_VALIDATION = "phase:2"
+PHASE_IMPLEMENTATION = "phase:B"
+PHASE_QA = "phase:D"
+
+PHASE_GROUPS = {
+    PHASE_ARCHITECTURE: "main-pipeline",
+    PHASE_VALIDATION: "pre-processing",
+    PHASE_IMPLEMENTATION: "main-pipeline",
+    PHASE_QA: "main-pipeline",
+}
+
+PHASE_DEPENDENCIES = {
+    PHASE_ARCHITECTURE: (),
+    PHASE_VALIDATION: (PHASE_ARCHITECTURE,),
+    PHASE_IMPLEMENTATION: (PHASE_VALIDATION,),
+    PHASE_QA: (PHASE_IMPLEMENTATION,),
+}
+"""The four phases run_task implements, using the library's own phase ids.
+
+A subgraph of kgf's authored 44-phase topology, not a parallel invention: the
+ids, their groups and their order all come from there, and the topology test
+proves each id still exists in the library's phases.json. The other 40 phases
+have no implementation in this tool yet, so they are absent rather than
+stubbed -- a stub that returns nothing would schedule and then silently
+contribute nothing.
+"""
+
+
+@dataclass
+class RunRuntime:
+    """Parent-side handles for phases that cannot run in a child process.
+
+    Never enters `NodeSpec.state` and is therefore never pickled. A Router
+    holds an LLMClient which holds live provider sessions; shipping one into a
+    spawned child would either fail to pickle or hand the child a duplicate
+    rate limiter, which is the same defect M10 documents in llm_client's
+    unlocked `_limiters` dict.
+    """
+
+    router: Router
+    client: LLMClient
+    workdir: Path
+    skill: object | None = None
+    subagent: SubAgent | None = None
+    on_event: OnEvent = noop_event
+
+
+def _node_architecture(remote_llm: RemoteLLM, spec) -> str:
+    """phase:A -- propose an implementation blueprint in its own process."""
+    state = spec.state
+    return _persona_solution_architect(
+        remote_llm,
+        state["task"],
+        state["language"],
+        state.get("context"),
+        None,
+    )
+
+
+def _node_validation(remote_llm: RemoteLLM, spec) -> dict:
+    """phase:2 -- joint blueprint validation, with one bounded revision round.
+
+    The revise-then-re-review round is held INSIDE this node rather than
+    expressed as graph edges, for the reason traversal.md:312 gives about
+    self-correction: a recovery loop belongs to the runtime, and as edges it
+    would make the graph cyclic. Bounded at a single revision, exactly as the
+    hardcoded path it replaces was, because self-heal on the real code is the
+    final backstop rather than an unbounded architect-versus-reviewer
+    negotiation.
+    """
+    state = spec.state
+    blueprint = state.get(UPSTREAM_KEY, {}).get(PHASE_ARCHITECTURE, "")
+    if not blueprint:
+        raise NodeFailure(
+            "validation has no blueprint to validate",
+            failure_class=FailureClass.PERMANENT,
+        )
+
+    approved, verdict = _persona_consensus_review(remote_llm, state["task"], blueprint, 1)
+    rounds = [{"round": 1, "approved": approved, "verdict": verdict}]
+
+    if not approved:
+        blueprint = _persona_solution_architect(
+            remote_llm,
+            state["task"],
+            state["language"],
+            state.get("context"),
+            verdict,
+        )
+        approved, verdict = _persona_consensus_review(remote_llm, state["task"], blueprint, 2)
+        rounds.append({"round": 2, "approved": approved, "verdict": verdict})
+
+    return {"blueprint": blueprint, "approved": approved, "verdict": verdict, "rounds": rounds}
+
+
+def _node_implementation(runtime: RunRuntime, spec) -> dict:
+    """phase:B -- generate the files, in parallel when the manifest earns it.
+
+    Runs in the parent because it spawns agents of its own through
+    parallel_generate; a spawned implementation node would be nesting spawn
+    inside spawn, forking the coordinator and its dispatcher thread with it.
+    """
+    state = spec.state
+    validation = state.get(UPSTREAM_KEY, {}).get(PHASE_VALIDATION) or {}
+    plan = validation.get("blueprint") or None
+
+    context = state.get("context")
+    if plan:
+        context = f"{context}\n\nImplementation plan:\n{plan}" if context else f"Implementation plan:\n{plan}"
+
+    artifact = None
+    if state.get("parallel_allowed"):
+        manifest = None
+        groups = None
+        try:
+            manifest = parallel_generate.plan_file_manifest(
+                state["task"], state["language"], context, runtime.router, runtime.client,
+                on_event=runtime.on_event,
+            )
+            groups = parallel_generate._partition_manifest(manifest)
+        except GenerationError as exc:
+            runtime.on_event({"type": "manifest_planning_failed", "reason": str(exc)})
+
+        if manifest and len(manifest) > parallel_generate.PARALLEL_FILE_THRESHOLD and len(groups) > 1:
+            artifact = parallel_generate.generate_parallel(
+                state["task"],
+                state["language"],
+                manifest,
+                groups,
+                runtime.router,
+                runtime.client,
+                context=context,
+                skill=runtime.skill,
+                subagent=runtime.subagent,
+                on_event=runtime.on_event,
+            )
+
+    if artifact is None:
+        artifact = generate_module.generate(
+            state["task"],
+            state["language"],
+            runtime.router,
+            runtime.client,
+            context=context,
+            skill=runtime.skill,
+            subagent=runtime.subagent,
+            priority="interactive",
+            on_event=runtime.on_event,
+        )
+
+    return {"artifact": artifact, "context": context, "plan": plan}
+
+
+def _node_qa(runtime: RunRuntime, spec) -> dict:
+    """phase:D -- write the generated files out and run the tests.
+
+    In the parent because it touches the workdir and the language adapters,
+    neither of which is worth shipping through a pickle.
+    """
+    implementation = spec.state.get(UPSTREAM_KEY, {}).get(PHASE_IMPLEMENTATION) or {}
+    artifact = implementation.get("artifact")
+    if artifact is None:
+        raise NodeFailure(
+            "qa has no artifact to test",
+            failure_class=FailureClass.PERMANENT,
+        )
+    write_files(runtime.workdir, artifact.files)
+    result = run_tests(runtime.workdir, spec.state["language"])
+    runtime.on_event({"type": "tests_run", "attempt": 0, "passed": result.passed})
+    return {"result": result, "artifact": artifact}
+
+
+PHASE_FUNCTIONS = {
+    PHASE_ARCHITECTURE: _node_architecture,
+    PHASE_VALIDATION: _node_validation,
+    PHASE_IMPLEMENTATION: _node_implementation,
+    PHASE_QA: _node_qa,
+}
+
+IN_PARENT_PHASES = frozenset({PHASE_IMPLEMENTATION, PHASE_QA})
+
+
+def _tpm_budget(router: Router, client: LLMClient) -> int:
+    """The token-per-minute ceiling the coder role will be admitted under.
+
+    Read from the provider backing primary_coder's currently active candidate,
+    because that is the bucket a generate call competes for. The providers live
+    on the CLIENT rather than on the Router: Config holds both, but ModelConfig
+    carries only roles and limits, so asking the router for them silently
+    yields nothing.
+
+    Zero when the provider declares no tpm_budget, which disables the cap
+    rather than inventing one -- a local runtime has no meaningful
+    tokens-per-minute limit and pacing it for an imagined ceiling would be
+    worse than not pacing it at all.
+    """
+    providers = getattr(client, "_providers", None)
+    if not providers:
+        return 0
+    try:
+        candidate = router.resolve("primary_coder")
+    except ConfigError:
+        return 0
+    provider = providers.get(candidate.provider)
+    return (provider.tpm_budget or 0) if provider is not None else 0
+
+
+def _phase_failure(report) -> str:
+    """Explain why a phase run produced no artifact, naming every phase.
+
+    Written out in full because the first version of this message reported
+    only the QA and implementation phases' own `error`, and a phase that was
+    SKIPPED carries no error at all -- so a failure two levels upstream
+    surfaced as "did not complete:" with nothing after the colon.
+    """
+    parts: list[str] = []
+    for label, result in report.results.items():
+        if result.outcome is Outcome.COMPLETED:
+            continue
+        if result.outcome is Outcome.SKIPPED:
+            parts.append(f"{label} skipped because {result.skipped_because} did not complete")
+        else:
+            reason = result.error or "no reason recorded"
+            parts.append(f"{label} failed ({result.failure_class or 'unclassified'}): {reason}")
+    return "; ".join(parts) if parts else "no phase produced an artifact"
+
+
+def _phase_topology() -> Topology:
+    """The four implemented phases as a Topology, so pruning splices properly.
+
+    Built on kgf's own Topology rather than a local dict so that dropping a
+    phase rewires its dependents onto its dependencies. Removing a node and
+    leaving the dangling edge was measured to be wrong in M5: it floated
+    phase:F.1 to level 0, scheduling a security audit before implementation.
+    Here the same defect would let implementation start with no blueprint.
+    """
+    return Topology(
+        phases={
+            phase_id: Phase(
+                id=phase_id,
+                group=PHASE_GROUPS[phase_id],
+                depends_on=frozenset(dependencies),
+            )
+            for phase_id, dependencies in PHASE_DEPENDENCIES.items()
+        }
+    )
+
+
+def _phase_specs(
+    pruned: tuple[str, ...],
+    *,
+    task: str,
+    language: str,
+    context: str | None,
+    parallel_allowed: bool,
+) -> list[NodeSpec]:
+    """One NodeSpec per surviving phase, carrying only picklable state."""
+    specs: list[NodeSpec] = []
+    for phase_id in PHASE_DEPENDENCIES:
+        if phase_id in pruned:
+            continue
+        state = {
+            "task": task,
+            "language": language,
+            "context": context,
+            "parallel_allowed": parallel_allowed,
+            SPAWN_KEY: phase_id not in IN_PARENT_PHASES,
+        }
+        specs.append(NodeSpec(label=phase_id, node_type=phase_id, state=state))
+    return specs
+
+
 def run_task(
     task: str,
     workdir: Path,
@@ -523,6 +809,9 @@ def run_task(
     agent_name: str | None = None,
     max_heal_attempts: int = 3,
     heal_timeout_seconds: int = 300,
+    intent: str = "implement",
+    context_budget_tokens: int = 2000,
+    library: Path | None = None,
     on_event: OnEvent = noop_event,
 ) -> RunResult:
     """Run the full orchestrated pipeline for one task.
@@ -536,9 +825,16 @@ def run_task(
         use_rag: Whether to build lightweight file-based context from project_dir.
         project_dir: Existing project root to search for RAG context.
         skill_name: Force a specific skill by name instead of auto-matching.
-        agent_name: Force a specific subagent persona by name.
+        agent_name: Force a specific agent persona by name, skipping ranking.
+            Its closure and context are still built, so forcing an agent does
+            not mean forcing a truncated description.
         max_heal_attempts: Maximum self-heal retries on test failure.
         heal_timeout_seconds: Maximum wall-clock time for the self-heal loop.
+        intent: What the assembled context is for -- implement, design or
+            review. Decides which document sections earn their tokens.
+        context_budget_tokens: Ceiling for the assembled knowledge context.
+        library: claude-global-library root; None discovers the sibling
+            directory.
         on_event: Progress event sink (see engine/calling.py) -- called for
             every model call, fallback, and self-heal attempt.
 
@@ -555,138 +851,88 @@ def run_task(
     resolved_language = language or detect_language(engineered_task, router, client, on_event=on_event)
     on_event({"type": "language_detected", "language": resolved_language})
 
-    skills = load_all_skills()
-    agents = load_all_agents()
+    selection = knowledge.resolve(
+        engineered_task,
+        intent=intent,
+        budget_tokens=context_budget_tokens,
+        forced_agent=agent_name,
+        library=library,
+        on_event=on_event,
+    )
 
     skill = None
     if skill_name is not None:
-        skill = next((s for s in skills if s.name == skill_name), None)
-    else:
-        skill = match_skill(task, skills, resolved_language)
+        skill = next((s for s in load_all_skills() if s.name == skill_name), None)
 
-    subagent: SubAgent | None = get_agent(agent_name, agents) if agent_name else None
-    if subagent is None and agent_name is None:
-        # Milestone 1.6: prefer the real orchestration decision tree's
-        # keyword-scored pattern match (claude-workflow-engine's KGRouter)
-        # over silently leaving subagent unset -- fails open to today's
-        # behavior (subagent stays None) whenever the sibling repo isn't
-        # importable or no confident match was found. See engine/kg_routing.py.
-        kg_route = route_persona(engineered_task)
-        if kg_route is not None:
-            subagent = SubAgent(
-                name=kg_route.lead_agent_name,
-                description=f"KG-routed lead agent for pattern {kg_route.pattern_id} ({kg_route.domain})",
-                role="primary_coder",
-                system_prompt=kg_route.persona_markdown,
-            )
-            on_event(
-                {
-                    "type": "kg_route_resolved",
-                    "domain": kg_route.domain,
-                    "pattern_id": kg_route.pattern_id,
-                    "lead_agent": kg_route.lead_agent_name,
-                    "trace": kg_route.trace,
-                }
-            )
-        else:
-            on_event({"type": "kg_route_unavailable", "reason": "no confident KG match or library not importable"})
+    subagent: SubAgent | None = None
+    if selection.has_persona:
+        subagent = SubAgent(
+            name=selection.agent_name,
+            description=f"kgf-selected lead agent for {selection.domain} (confidence {selection.confidence:.3f})",
+            role=selection.role,
+            system_prompt=selection.context_text,
+        )
 
     context = rag.build_context(engineered_task, project_dir) if use_rag else None
+    if subagent is None and selection.context_text and selection.selected:
+        context = f"{context}\n\n{selection.context_text}" if context else selection.context_text
 
     complexity = classify_complexity(engineered_task, router, client, on_event=on_event)
     on_event({"type": "complexity_classified", "complexity": complexity})
 
-    plan: str | None = None
-    if complexity == "complex":
-        # Milestone 1.5: propose/review run as genuinely separate OS
-        # processes (real agent spawning), funneled through one
-        # AgentCoordinator so the shared RateLimiter/Router stay honest --
-        # see engine/agent_runtime.py. Bounded 2-round loop, event payloads,
-        # and revision-feedback threading are unchanged from before.
-        coordinator = AgentCoordinator(router, client, on_event=on_event)
-        try:
-            blueprint = coordinator.run_agent(
-                _persona_solution_architect, (engineered_task, resolved_language, context, None)
-            )
-            on_event({"type": "architecture_proposed", "blueprint": blueprint})
+    pruned = () if complexity == "complex" else (PHASE_ARCHITECTURE, PHASE_VALIDATION)
+    topology = _phase_topology()
+    specs = _phase_specs(
+        pruned,
+        task=engineered_task,
+        language=resolved_language,
+        context=context,
+        parallel_allowed=complexity == "complex",
+    )
 
-            approved, verdict = coordinator.run_agent(
-                _persona_consensus_review, (engineered_task, blueprint, 1)
-            )
-            on_event({"type": "consensus_verdict", "round": 1, "approved": approved, "reason": verdict})
+    runtime = RunRuntime(
+        router=router,
+        client=client,
+        workdir=workdir,
+        skill=skill,
+        subagent=subagent,
+        on_event=on_event,
+    )
 
-            if not approved:
-                blueprint = coordinator.run_agent(
-                    _persona_solution_architect, (engineered_task, resolved_language, context, verdict)
-                )
-                on_event({"type": "architecture_revised", "blueprint": blueprint})
-
-                # Bounded re-review: at most one more round on the revision, then
-                # proceed regardless (self-heal on the actual code is the final
-                # backstop, not an unbounded architect<->consensus negotiation).
-                approved, verdict = coordinator.run_agent(
-                    _persona_consensus_review, (engineered_task, blueprint, 2)
-                )
-                on_event({"type": "consensus_verdict", "round": 2, "approved": approved, "reason": verdict})
-        finally:
-            coordinator.stop()
-
-        plan = blueprint
-        context = f"{context}\n\nImplementation plan:\n{plan}" if context else f"Implementation plan:\n{plan}"
-
-    if complexity == "complex":
-        manifest = None
-        groups = None
-        try:
-            manifest = parallel_generate.plan_file_manifest(
-                engineered_task, resolved_language, context, router, client, on_event=on_event
-            )
-            groups = parallel_generate._partition_manifest(manifest)
-        except GenerationError as exc:
-            # A manifest-planning failure must not fail the whole task --
-            # fall back to today's reliable single-call path.
-            on_event({"type": "manifest_planning_failed", "reason": str(exc)})
-
-        if manifest and len(manifest) > parallel_generate.PARALLEL_FILE_THRESHOLD and len(groups) > 1:
-            artifact: GeneratedArtifact = parallel_generate.generate_parallel(
-                engineered_task,
-                resolved_language,
-                manifest,
-                groups,
-                router,
-                client,
-                context=context,
-                skill=skill,
-                subagent=subagent,
-                on_event=on_event,
-            )
-        else:
-            artifact = generate_module.generate(
-                engineered_task,
-                resolved_language,
-                router,
-                client,
-                context=context,
-                skill=skill,
-                subagent=subagent,
-                priority="interactive",
-                on_event=on_event,
-            )
-    else:
-        artifact = generate_module.generate(
-            engineered_task,
-            resolved_language,
-            router,
-            client,
-            context=context,
-            skill=skill,
-            subagent=subagent,
-            priority="interactive",
+    coordinator = AgentCoordinator(router, client, on_event=on_event)
+    try:
+        executor = CoordinatorExecutor(coordinator, PHASE_FUNCTIONS, runtime, on_event=on_event)
+        report = run_dag(
+            specs,
+            topology.effective_edges(pruned),
+            executor,
+            tpm_budget=_tpm_budget(router, client),
             on_event=on_event,
         )
-    write_files(workdir, artifact.files)
-    result: ExecutionResult = run_tests(workdir, resolved_language)
-    on_event({"type": "tests_run", "attempt": 0, "passed": result.passed})
+    finally:
+        coordinator.stop()
+
+    on_event(
+        {
+            "type": "phases_completed",
+            "levels": report.levels,
+            "completed": list(report.completed),
+            "failed": list(report.failed),
+            "skipped": list(report.skipped),
+        }
+    )
+
+    validation = report.values().get(PHASE_VALIDATION) or {}
+    plan = validation.get("blueprint")
+    for entry in validation.get("rounds", ()):
+        on_event({"type": "consensus_verdict", **entry})
+
+    qa = report.values().get(PHASE_QA)
+    if qa is None:
+        raise GenerationError(f"implementation phases did not complete: {_phase_failure(report)}")
+
+    artifact = qa["artifact"]
+    result: ExecutionResult = qa["result"]
     attempts = [AttemptRecord(attempt=0, files=artifact.files, result=result)]
 
     if result.passed:

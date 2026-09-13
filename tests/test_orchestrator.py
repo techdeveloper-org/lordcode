@@ -1,4 +1,4 @@
-"""Unit tests for Milestone 8's orchestrator.run_task branching:
+"""Unit tests for orchestrator.run_task's generation path:
 complex-task manifest planning -> parallel or single-call generation,
 simple tasks entirely untouched, and a manifest-planning failure falling
 back to the single-call path instead of failing the whole task.
@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from vishwakarma.config import ModelConfig, RoleCandidate
-from vishwakarma.engine import orchestrator, parallel_generate
+from vishwakarma.engine import knowledge, orchestrator, parallel_generate
 from vishwakarma.engine.executor import ExecutionResult
 from vishwakarma.engine.generate import FileSpec, GeneratedArtifact, GenerationError
 from vishwakarma.router import Router
@@ -46,27 +46,59 @@ def _models() -> ModelConfig:
     )
 
 
-def _fake_persona_solution_architect(remote_llm, task, language, context, revision_feedback):
+def _fake_node_architecture(remote_llm, spec):
+    """Stand in for phase:A in its child process.
+
+    Module level because that is what makes the substitution actually reach
+    the child: pickle stores a function by qualified name, so a nested fake
+    would be resolved in the child as the real orchestrator function and the
+    test would issue a live call.
+    """
     return "FILES:\n- app.py: main entrypoint\n"
 
 
-def _fake_persona_consensus_review(remote_llm, task, blueprint, round_number):
-    return True, "VERDICT: APPROVED\nREASON: fine."
+def _fake_node_validation(remote_llm, spec):
+    """Stand in for phase:2, approving on the first round."""
+    blueprint = spec.state.get("upstream", {}).get(orchestrator.PHASE_ARCHITECTURE, "")
+    verdict = "VERDICT: APPROVED\nREASON: fine."
+    return {
+        "blueprint": blueprint,
+        "approved": True,
+        "verdict": verdict,
+        "rounds": [{"round": 1, "approved": True, "verdict": verdict}],
+    }
+
+
+def _no_knowledge(*args, **kwargs):
+    """Selection stubbed out: these tests are about phase flow, not routing.
+
+    Returning no_match also keeps them independent of whether
+    claude-global-library is present, which run_task otherwise treats as a
+    hard error by design.
+    """
+    return knowledge.Knowledge(outcome="no_match", library_version="test")
 
 
 @pytest.fixture(autouse=True)
 def _stub_pipeline_scaffolding(monkeypatch):
-    """Bypass everything upstream/downstream of the generation call site
-    that Milestone 8's branching logic doesn't touch."""
+    """Bypass everything upstream and downstream of the generation call site.
+
+    The behaviour these tests assert is unchanged by M6a; where it lives is
+    not. The complexity branch became a pruned phase set, so the substitution
+    point moved from the spawned personas to the phase functions that wrap
+    them -- patching a persona would no longer reach the child process.
+    """
     monkeypatch.setattr(orchestrator, "engineer_context", lambda *a, **k: "context block")
     monkeypatch.setattr(orchestrator, "engineer_prompt", lambda *a, **k: "engineered task")
     monkeypatch.setattr(orchestrator, "detect_language", lambda *a, **k: "python")
     monkeypatch.setattr(orchestrator, "load_all_skills", lambda: [])
-    monkeypatch.setattr(orchestrator, "load_all_agents", lambda: [])
-    monkeypatch.setattr(orchestrator, "match_skill", lambda *a, **k: None)
-    monkeypatch.setattr(orchestrator, "route_persona", lambda *a, **k: None)
-    monkeypatch.setattr(orchestrator, "_persona_solution_architect", _fake_persona_solution_architect)
-    monkeypatch.setattr(orchestrator, "_persona_consensus_review", _fake_persona_consensus_review)
+    monkeypatch.setattr(knowledge, "resolve", _no_knowledge)
+    monkeypatch.setitem(
+        orchestrator.PHASE_FUNCTIONS, orchestrator.PHASE_ARCHITECTURE, _fake_node_architecture
+    )
+    monkeypatch.setitem(
+        orchestrator.PHASE_FUNCTIONS, orchestrator.PHASE_VALIDATION, _fake_node_validation
+    )
     monkeypatch.setattr(orchestrator, "write_files", lambda *a, **k: None)
     monkeypatch.setattr(
         orchestrator, "run_tests", lambda *a, **k: ExecutionResult(passed=True, stdout="", stderr="", returncode=0)
