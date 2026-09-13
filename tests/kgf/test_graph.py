@@ -49,12 +49,12 @@ def test_real_records_never_raise_on_any_accessor(graph):
         assert isinstance(agent.model, str)
         assert isinstance(agent.declared_tools, tuple)
         assert isinstance(agent.is_math_master, bool)
-        assert isinstance(agent.primary_domain, str)
+        assert isinstance(agent.declared_domain, str)
     for skill in graph.skills.values():
         assert isinstance(skill.name, str)
         assert isinstance(skill.allowed_tools, tuple)
         assert isinstance(skill.m_sections, tuple)
-        assert isinstance(skill.domain, str)
+        assert isinstance(skill.declared_domain, str)
 
 
 def test_lookup_accepts_any_reference_form(graph):
@@ -102,3 +102,46 @@ def test_node_and_edge_counts_agree_with_the_registries(graph):
     )
     assert graph.edge_count == len(graph.edges)
     assert sum(graph.edge_type_counts().values()) == graph.edge_count
+
+
+def test_domain_membership_is_read_from_edges_not_from_the_record(graph):
+    """A record's own `domain` field is a display name on 175 of 1034 skills.
+
+    "India CA Suite", "Digital Advertising", "EdTech" -- so an id built from
+    that field names no node. The membership edge is the authority, exactly as
+    it is for math delegation.
+    """
+    from kgf import ids
+
+    diverged = [
+        skill
+        for skill in graph.skills.values()
+        if skill.declared_domain and ids.domain_id(skill.declared_domain) not in graph.domains
+    ]
+    assert diverged, (
+        "expected some records to store a display name; if the library has "
+        "normalised them, revisit graph.domain_of's docstring"
+    )
+
+    for skill in diverged:
+        resolved = graph.domain_of(skill.id)
+        assert resolved in graph.domains, f"{skill.id} has no resolvable domain edge"
+
+
+def test_every_skill_and_agent_has_a_resolvable_domain(graph):
+    """1702 skill edges and 885 agent edges, covering every node."""
+    for skill_id in graph.skills:
+        assert graph.domain_of(skill_id) in graph.domains, skill_id
+    for agent_id in graph.agents:
+        assert graph.domain_of(agent_id) in graph.domains, agent_id
+
+
+def test_domains_of_returns_every_membership_without_duplicates(graph):
+    for node_id in list(graph.skills)[:100]:
+        memberships = graph.domains_of(node_id)
+        assert len(memberships) == len(set(memberships))
+        assert all(member in graph.domains for member in memberships)
+
+
+def test_domain_of_returns_empty_string_for_an_unknown_node(graph):
+    assert graph.domain_of("skill:does_not_exist_anywhere") == ""

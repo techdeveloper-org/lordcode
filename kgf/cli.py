@@ -92,7 +92,7 @@ def skill(name: str, library: Path = _LIBRARY_OPTION) -> None:
 
     typer.echo(f"{record.id}")
     typer.echo(f"  name:          {record.name}")
-    typer.echo(f"  domain:        {record.domain or '(unstated)'}")
+    typer.echo(f"  domain:        {graph.domain_of(record.id) or '(no membership edge)'}")
     typer.echo(f"  allowed tools: {', '.join(record.allowed_tools) or '(none declared)'}")
     typer.echo(f"  M sections:    {len(record.m_sections)}")
     for section in record.m_sections:

@@ -183,7 +183,46 @@ def validate_graph(graph: KnowledgeGraph, log: ProblemLog) -> ProblemLog:
     _check_dangling_allowlists(graph, log)
     _check_no_self_loops(graph, log)
     _check_id_patterns(graph, log)
+    _check_declared_domains_match_edges(graph, log)
     return log
+
+
+def _check_declared_domains_match_edges(graph: KnowledgeGraph, log: ProblemLog) -> None:
+    """Report records whose own domain field disagrees with their edges.
+
+    Measured: 175 of 1034 skill records store a DISPLAY NAME in `domain`
+    ("India CA Suite", "Digital Advertising") rather than a slug, so an id
+    built from that field names no node. The membership edges cover every
+    skill and agent with no unresolved target, so kgf reads domains from
+    edges -- but the divergence is reported rather than quietly routed around,
+    because it is the same denormalisation class as math_delegation_target and
+    the library should know.
+    """
+    diverged = 0
+    for skill in graph.skills.values():
+        declared = skill.declared_domain
+        if not declared:
+            continue
+        if ids.domain_id(declared) not in graph.domains:
+            diverged += 1
+
+    if diverged:
+        log.defect(
+            "DECLARED_DOMAIN_NOT_A_SLUG",
+            f"{diverged} skill record(s) store a display name in `domain` rather than a "
+            f"slug, so it resolves to no domain node; kgf reads "
+            f"SKILL_BELONGS_TO_DOMAIN instead",
+        )
+
+    unlinked = [
+        skill_id for skill_id in graph.skills if not graph.domain_of(skill_id)
+    ]
+    if unlinked:
+        log.defect(
+            "SKILL_WITHOUT_DOMAIN_EDGE",
+            f"{len(unlinked)} skill(s) have no resolvable SKILL_BELONGS_TO_DOMAIN edge",
+            source=unlinked[0],
+        )
 
 
 def _check_dangling_allowlists(graph: KnowledgeGraph, log: ProblemLog) -> None:

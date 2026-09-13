@@ -121,10 +121,17 @@ class Agent(Record):
         return self.flag("is_math_master")
 
     @property
-    def primary_domain(self) -> str:
-        """Canonical id of the agent's primary home domain, or ""."""
-        slug = self.text("primary_home_kg", "domain")
-        return ids.domain_id(slug) if slug else ""
+    def declared_domain(self) -> str:
+        """The agent's own primary_home_kg value, VERBATIM and unresolved.
+
+        Deliberately not an id. Use KnowledgeGraph.domain_of() to get a domain
+        that actually exists: a record's own domain field is denormalised and
+        not reliably a slug, exactly like math_delegation_target. It happens to
+        resolve for all 528 agents today, but the same field on skill records
+        fails for 175 of 1034, so treating either as an id invites the bug that
+        does not show up until the other registry is touched.
+        """
+        return self.text("primary_home_kg", "domain")
 
 
 @dataclass(frozen=True)
@@ -152,10 +159,16 @@ class Skill(Record):
         return self.strings("m_sections")
 
     @property
-    def domain(self) -> str:
-        """Canonical id of the skill's home domain, or ""."""
-        slug = self.text("domain")
-        return ids.domain_id(slug) if slug else ""
+    def declared_domain(self) -> str:
+        """The skill's own domain value, VERBATIM and unresolved.
+
+        This field is a DISPLAY NAME on 175 of 1034 records -- "India CA Suite",
+        "Digital Advertising", "EdTech" -- not a slug, so building a node id
+        from it produces something no registry contains. Use
+        KnowledgeGraph.domain_of(), which reads SKILL_BELONGS_TO_DOMAIN: 1702
+        edges, all 1034 skills covered, 0 unresolved targets.
+        """
+        return self.text("domain")
 
 
 @dataclass(frozen=True)
@@ -305,6 +318,42 @@ class KnowledgeGraph:
     def edges_of_type(self, edge_type: str) -> list[Edge]:
         """Every edge of one type."""
         return [edge for edge in self.edges if edge.type == edge_type]
+
+    def domain_of(self, node_id: str) -> str:
+        """The domain a skill or agent belongs to, read from the edges.
+
+        This is the only reliable way to ask the question. A record's own
+        `domain` / `primary_home_kg` field is denormalised and is a display
+        name on 175 of the 1034 skill records, so an id built from it names
+        nothing. SKILL_BELONGS_TO_DOMAIN and AGENT_BELONGS_TO_DOMAIN cover
+        every skill and every agent with no unresolved target.
+
+        Args:
+            node_id: Any reference to a skill or an agent.
+
+        Returns:
+            The canonical domain id, or "" if no membership edge exists.
+
+        Where a node has several membership edges, the first in the
+        registry's own order is returned -- deterministic, and matching the
+        primary-home convention the library uses.
+        """
+        canonical_id = ids.canonical(node_id)
+        for edge_type in ("SKILL_BELONGS_TO_DOMAIN", "AGENT_BELONGS_TO_DOMAIN"):
+            for edge in self.out_edges(canonical_id, edge_type):
+                if edge.target in self.domains:
+                    return edge.target
+        return ""
+
+    def domains_of(self, node_id: str) -> tuple[str, ...]:
+        """Every domain a skill or agent belongs to, in registry order."""
+        canonical_id = ids.canonical(node_id)
+        found: list[str] = []
+        for edge_type in ("SKILL_BELONGS_TO_DOMAIN", "AGENT_BELONGS_TO_DOMAIN"):
+            for edge in self.out_edges(canonical_id, edge_type):
+                if edge.target in self.domains and edge.target not in found:
+                    found.append(edge.target)
+        return tuple(found)
 
     def edge_type_counts(self) -> dict[str, int]:
         """How many edges of each type, including types with none."""
