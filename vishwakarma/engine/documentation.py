@@ -28,7 +28,7 @@ tool calls (engine/mcp_client.py) -- genuinely derived from actual source
 code, not LLM-guessed from HLD prose -- before falling back to the LLM
 persona path for any type that isn't AST-resolvable (usecase, always) or
 where the AST call failed/returned degraded output (fail-open, same
-discipline as engine/kg_routing.py's route_persona()).
+discipline engine/kg_routing.py's route_persona() used before M6b deleted it).
 """
 
 from __future__ import annotations

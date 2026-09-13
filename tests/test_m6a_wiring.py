@@ -328,12 +328,23 @@ class TestTheBoundary:
         assert "from vishwakarma.engine.dag_executor import" in text
         assert "import kgf" not in text
 
-    def test_the_dead_routing_path_is_no_longer_called(self):
-        """kg_routing.py still exists -- deleting it is M6b, gated on this
-        passing live -- but run_task must no longer reach for it."""
+    def test_the_dead_routing_path_is_gone_entirely(self):
+        """M6b deleted it. Until then this asserted only that run_task had
+        stopped calling it, because the module was still shipped."""
         text = pathlib.Path("vishwakarma/engine/orchestrator.py").read_text(encoding="utf-8")
         assert "route_persona" not in text
         assert "match_skill" not in text
+        assert not pathlib.Path("vishwakarma/engine/kg_routing.py").exists()
+        assert not pathlib.Path("vishwakarma/plugins.py").exists()
+
+    def test_no_sibling_repository_is_inserted_onto_sys_path(self):
+        """The coupling ADR-2 exists to prevent. kg_routing.py did this at
+        import time to reach claude-workflow-engine."""
+        offenders = []
+        for path in pathlib.Path("vishwakarma").rglob("*.py"):
+            if "sys.path.insert" in path.read_text(encoding="utf-8"):
+                offenders.append(str(path))
+        assert offenders == [], offenders
 
 
 class TestTheTriStateOutcomes:

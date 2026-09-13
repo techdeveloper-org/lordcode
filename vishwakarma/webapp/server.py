@@ -49,7 +49,7 @@ from vishwakarma.engine.orchestrator import RunResult, run_task
 from vishwakarma.engine.sdlc import generate_hld, generate_srs, hld_path_for, srs_path_for
 from vishwakarma.llm_client import LLMClient
 from vishwakarma.logging_config import configure_logging
-from vishwakarma.plugins import load_all_agents, load_all_skills
+from vishwakarma.engine import knowledge
 from vishwakarma.router import Router
 from vishwakarma.webapp import sessions
 
@@ -559,13 +559,13 @@ def delete_session_endpoint(session_id: str) -> dict:
 @app.get("/skills")
 def list_skills() -> list[dict[str, str]]:
     """Return every matchable skill's name + description, for the UI's search box."""
-    return [{"name": s.name, "description": s.description} for s in load_all_skills()]
+    return [{"name": s.name, "description": s.description} for s in knowledge.list_skills()]
 
 
 @app.get("/agents")
 def list_agents() -> list[dict[str, str]]:
     """Return every available subagent persona's name + role, for the UI's search box."""
-    return [{"name": a.name, "role": a.role, "description": a.description} for a in load_all_agents()]
+    return [{"name": a.name, "role": a.role, "description": a.description} for a in knowledge.list_agents()]
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

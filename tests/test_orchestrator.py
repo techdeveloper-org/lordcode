@@ -91,7 +91,6 @@ def _stub_pipeline_scaffolding(monkeypatch):
     monkeypatch.setattr(orchestrator, "engineer_context", lambda *a, **k: "context block")
     monkeypatch.setattr(orchestrator, "engineer_prompt", lambda *a, **k: "engineered task")
     monkeypatch.setattr(orchestrator, "detect_language", lambda *a, **k: "python")
-    monkeypatch.setattr(orchestrator, "load_all_skills", lambda: [])
     monkeypatch.setattr(knowledge, "resolve", _no_knowledge)
     monkeypatch.setitem(
         orchestrator.PHASE_FUNCTIONS, orchestrator.PHASE_ARCHITECTURE, _fake_node_architecture

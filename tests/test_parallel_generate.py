@@ -127,7 +127,7 @@ def test_partition_manifest_respects_bounds(file_count, expected_group_count, ex
 
 
 def _fake_persona_generate_subset(
-    remote_llm, task, language, manifest, file_paths, context, skill, subagent, dependency_content=None
+    remote_llm, task, language, manifest, file_paths, context, subagent, dependency_content=None
 ):
     return json.dumps({"files": [{"path": p, "content": f"content for {p}"} for p in file_paths]})
 
@@ -174,7 +174,7 @@ def test_generate_parallel_raises_on_duplicate_path_within_assigned_paths(tmp_pa
 
 
 def _over_generating_persona(
-    remote_llm, task, language, manifest, file_paths, context, skill, subagent, dependency_content=None
+    remote_llm, task, language, manifest, file_paths, context, subagent, dependency_content=None
 ):
     # Ignores the "generate ONLY these files" instruction and returns every
     # file in the manifest regardless of its own assigned file_paths --
@@ -233,7 +233,7 @@ def test_extract_manifest_dependencies_empty_for_unrelated_manifest():
 
 
 def _dependency_echoing_persona(
-    remote_llm, task, language, manifest, file_paths, context, skill, subagent, dependency_content=None
+    remote_llm, task, language, manifest, file_paths, context, subagent, dependency_content=None
 ):
     """Persona whose returned content encodes the dependency_content it was
     given, so a monkeypatch running across AgentCoordinator's real

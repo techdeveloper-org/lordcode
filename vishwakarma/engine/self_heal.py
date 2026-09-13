@@ -17,7 +17,7 @@ from vishwakarma.engine.generate import FileSpec, GenerationError, request_files
 from vishwakarma.engine.personas import persona_for_role
 from vishwakarma.engine.reasoning_utils import strip_reasoning_trace
 from vishwakarma.llm_client import LLMClient
-from vishwakarma.plugins import SubAgent
+from vishwakarma.engine.personas import SubAgent
 from vishwakarma.router import Router
 
 HISTORY_LIMIT = 2

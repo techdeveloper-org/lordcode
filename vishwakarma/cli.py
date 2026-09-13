@@ -40,7 +40,7 @@ from vishwakarma.engine.orchestrator import run_task
 from vishwakarma.engine.sdlc import generate_hld, generate_srs, hld_path_for, srs_path_for
 from vishwakarma.llm_client import LLMClient
 from vishwakarma.logging_config import configure_logging
-from vishwakarma.plugins import load_all_agents, load_all_skills
+from vishwakarma.engine import knowledge
 from vishwakarma.router import Router
 
 app = typer.Typer(help="Vishwakarma: local code-gen + auto-test tool on Groq's free API.")
@@ -77,10 +77,28 @@ def _echo_event(event: dict) -> None:
         typer.echo(f"  [agent] spawned {event['persona']} agent_id={event['agent_id'][:8]} pid={event['pid']}")
     elif event_type == "agent_completed":
         typer.echo(f"  [agent] agent_id={event['agent_id'][:8]} finished in {event['duration_ms']}ms")
-    elif event_type == "kg_route_resolved":
-        typer.echo(f"  [kg] routed to [{event['lead_agent']}] via {event['pattern_id']} ({event['domain']})")
-    elif event_type == "kg_route_unavailable":
-        typer.echo(f"  [kg] routing unavailable: {event['reason']}")
+    elif event_type == "kgf_selection":
+        if event.get("agent"):
+            typer.echo(
+                f"  [kgf] {event['outcome']}: [{event['agent']}] in {event['domain']} "
+                f"confidence={event['confidence']} role={event['role']} "
+                f"skills={event['skills']} context={event['context_tokens']}/{event['budget_tokens']} tok"
+            )
+            for step in event.get("edge_path", []):
+                typer.echo(f"        via {step}")
+        else:
+            typer.echo(f"  [kgf] {event['outcome']}: no match among {event.get('considered', 0)} candidates")
+    elif event_type == "kgf_defect":
+        typer.secho(f"  [kgf] defect: {event['detail']}", fg=typer.colors.YELLOW)
+    elif event_type == "phases_completed":
+        typer.echo(f"  [phases] completed {', '.join(event['completed'])}")
+        if event.get("failed"):
+            typer.secho(f"  [phases] failed {', '.join(event['failed'])}", fg=typer.colors.RED)
+        if event.get("skipped"):
+            typer.secho(f"  [phases] skipped {', '.join(event['skipped'])}", fg=typer.colors.YELLOW)
+    elif event_type == "heal_refused":
+        typer.secho(f"  [heal] refused: {event['reason']}", fg=typer.colors.YELLOW)
+        typer.secho(f"         {event['detail']}", fg=typer.colors.YELLOW)
     elif event_type == "diagram_source":
         typer.echo(f"  [docs] {event['diagram_type']} diagram source: {event['source']}")
     elif event_type == "diagram_generated":
@@ -226,15 +244,19 @@ def run(
 
 @app.command()
 def skills() -> None:
-    """List every auto-matchable skill (Vishwakarma's own + the global library)."""
-    for skill in load_all_skills():
+    """List every skill in the knowledge graph."""
+    for skill in knowledge.list_skills():
         typer.echo(f"{skill.name}: {skill.description}")
 
 
 @app.command()
 def agents() -> None:
-    """List every available subagent persona (Vishwakarma's own + the global library)."""
-    for agent in load_all_agents():
+    """List every agent persona in the knowledge graph, with its derived role.
+
+    The role is computed by kgf's classifier, not read from the documents: 0 of
+    the library's 1562 markdown files declare one.
+    """
+    for agent in knowledge.list_agents():
         typer.echo(f"{agent.name} [{agent.role}]: {agent.description}")
 
 

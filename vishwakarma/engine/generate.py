@@ -12,9 +12,8 @@ import json
 from dataclasses import dataclass
 
 from vishwakarma.engine.calling import OnEvent, call_role, noop_event
-from vishwakarma.engine.personas import persona_for_role
+from vishwakarma.engine.personas import SubAgent, persona_for_role
 from vishwakarma.llm_client import LLMClient
-from vishwakarma.plugins import Skill, SubAgent
 from vishwakarma.router import Router
 
 MAX_CODER_TOKENS = 8000
@@ -50,16 +49,14 @@ class GeneratedArtifact:
     files: list[FileSpec]
 
 
-def _build_system_prompt(language: str, skill: Skill | None, subagent: SubAgent | None) -> str:
-    """Compose the coder's system prompt from the base contract + optional plugins."""
+def _build_system_prompt(language: str, subagent: SubAgent | None) -> str:
+    """Compose the coder's system prompt from the base contract + optional persona."""
     parts = [
         "You are an expert software engineer generating production code and "
         "its own tests together in one response.",
         f"Target language/stack: {language}.",
         RESPONSE_CONTRACT,
     ]
-    if skill is not None:
-        parts.append(f"Stack-specific guidance ({skill.name}):\n{skill.prompt_addition}")
     coder_persona = persona_for_role(subagent, "primary_coder")
     if coder_persona is not None:
         parts.append(f"Persona override ({coder_persona.name}):\n{coder_persona.system_prompt}")
@@ -172,7 +169,6 @@ def generate(
     router: Router,
     client: LLMClient,
     context: str | None = None,
-    skill: Skill | None = None,
     subagent: SubAgent | None = None,
     priority: str = "interactive",
     on_event: OnEvent = noop_event,
@@ -185,7 +181,6 @@ def generate(
         router: Resolves model roles to live candidates.
         client: The multi-provider LLM client to call through.
         context: Optional lightweight file-based context from engine/rag.py.
-        skill: Optional matched Skill to steer stack-specific idioms.
         subagent: Optional SubAgent persona override for the coder role.
         priority: Rate-limiter priority tier ("interactive" for a fresh request).
         on_event: Progress event sink (see engine/calling.py).
@@ -193,7 +188,7 @@ def generate(
     Returns:
         The generated files (code + tests).
     """
-    system_prompt = _build_system_prompt(language, skill, subagent)
+    system_prompt = _build_system_prompt(language, subagent)
     user_content = task
     if context:
         user_content += f"\n\nRelevant existing project context:\n{context}"

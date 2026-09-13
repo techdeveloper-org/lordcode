@@ -8,8 +8,8 @@ else to crib from).
 top, not deferred -- so importing this module never itself fails on a
 correctly installed environment. Fail-open behavior lives entirely inside
 call_mcp_tools()'s try/except around the actual session/subprocess/tool-call
-work, mirroring engine/kg_routing.py's fail-open convention for the
-sibling claude-workflow-engine dependency: any error here (server missing,
+work, mirroring the fail-open convention engine/kg_routing.py used for its
+sibling claude-workflow-engine dependency before M6b deleted it: any error here (server missing,
 ImportError inside the server process, timeout, malformed response) yields
 a per-call MCPToolResult(ok=False, ...) rather than raising, so callers can
 fall back to their own non-MCP path exactly as documentation.py already
@@ -45,11 +45,13 @@ MCP_SERVERS: dict[str, Path] = {
     "figma": _WORKSPACE_ROOT / "mcp-figma" / "server.py",
     "jira": _WORKSPACE_ROOT / "mcp-jira-api" / "server.py",
 }
-"""Registry of known sibling MCP servers, resolved workspace-root-relative --
-same sibling-detection convention as engine/kg_routing.py's
-_ensure_workflow_engine_on_path() (mcp_client.py sits one directory
-shallower than kg_routing.py, hence parents[2] here vs kg_routing.py's
-parents[3] -- both resolve to the same workspace root)."""
+"""Registry of known sibling MCP servers, resolved workspace-root-relative.
+
+This is now the ONLY sibling-path resolution left in the package: M6b deleted
+engine/kg_routing.py, whose _ensure_workflow_engine_on_path() inserted a
+sibling repository onto sys.path at import time. This one resolves a path to
+spawn a server from and never touches sys.path, which is the distinction that
+matters -- ADR-2 forbids the import coupling, not knowing where a sibling is."""
 
 
 @dataclass
