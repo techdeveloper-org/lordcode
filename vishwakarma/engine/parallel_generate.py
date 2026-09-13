@@ -58,7 +58,7 @@ from vishwakarma.engine.generate import (
 from vishwakarma.engine.reasoning_utils import strip_reasoning_trace
 from vishwakarma.engine.self_heal import _truncate
 from vishwakarma.llm_client import LLMClient
-from vishwakarma.plugins import Skill, SubAgent
+from vishwakarma.engine.personas import SubAgent
 from vishwakarma.router import Router
 
 PARALLEL_FILE_THRESHOLD = 4
@@ -364,13 +364,12 @@ def _persona_generate_subset(
     manifest: list[dict],
     file_paths: list[str],
     context: str | None,
-    skill: Skill | None,
     subagent: SubAgent | None,
     dependency_content: dict[str, str] | None = None,
 ) -> str:
     """Spawned-agent persona that generates content for one subset of files.
 
-    Reuses generate._build_system_prompt unchanged, so skill/subagent
+    Reuses generate._build_system_prompt unchanged, so the subagent
     overrides are honored identically to the single-call path. Returns the
     raw, unstripped response text -- matching generate.request_files_from_coder's
     own primary_coder-role convention (generate.py has no reasoning_utils
@@ -381,7 +380,7 @@ def _persona_generate_subset(
     group in a manifest with no detected dependencies), the prompt is
     byte-for-byte identical to Milestone 8's original.
     """
-    system_prompt = _build_system_prompt(language, skill, subagent)
+    system_prompt = _build_system_prompt(language, subagent)
     manifest_block = "\n".join(f"- {item['path']}: {item['responsibility']}" for item in manifest)
     user_content = (
         f"{task}\n\nFull project file manifest:\n{manifest_block}\n\n"
@@ -418,7 +417,6 @@ def generate_parallel(
     router: Router,
     client: LLMClient,
     context: str | None = None,
-    skill: Skill | None = None,
     subagent: SubAgent | None = None,
     on_event: OnEvent = noop_event,
 ) -> GeneratedArtifact:
@@ -468,7 +466,7 @@ def generate_parallel(
                     AgentSpec(
                         label=label,
                         persona_fn=_persona_generate_subset,
-                        args=(task, language, manifest, group_paths, context, skill, subagent, dependency_content),
+                        args=(task, language, manifest, group_paths, context, subagent, dependency_content),
                     )
                 )
 

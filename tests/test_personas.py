@@ -8,9 +8,10 @@ persona was injected as the persona that writes code.
 
 from __future__ import annotations
 
+import pytest
+
 from vishwakarma.engine.generate import _build_system_prompt
-from vishwakarma.engine.personas import persona_for_role
-from vishwakarma.plugins import SubAgent
+from vishwakarma.engine.personas import SubAgent, persona_for_role
 
 
 def _persona(name: str, role: str | None) -> SubAgent:
@@ -57,7 +58,7 @@ def test_role_mismatch_refusal_names_the_declared_role():
 def test_auditor_persona_is_not_injected_into_the_coder_prompt():
     """The live defect: an auditor persona reaching the code-writing prompt."""
     auditor = _persona("architecture-conformance-auditor", None)
-    prompt = _build_system_prompt("python", None, auditor)
+    prompt = _build_system_prompt("python", auditor)
 
     assert "PROMPT::architecture-conformance-auditor" not in prompt
     assert "Persona override" not in prompt
@@ -66,7 +67,7 @@ def test_auditor_persona_is_not_injected_into_the_coder_prompt():
 def test_declared_coder_persona_still_reaches_the_coder_prompt():
     """The gate must refuse guesses without breaking explicit declarations."""
     coder = _persona("strict-tester", "primary_coder")
-    prompt = _build_system_prompt("python", None, coder)
+    prompt = _build_system_prompt("python", coder)
 
     assert "PROMPT::strict-tester" in prompt
     assert "Persona override (strict-tester)" in prompt
@@ -78,9 +79,22 @@ def test_library_personas_declare_no_role_today():
     If this ever fails, the library has started declaring roles and the
     interim regression recorded in issue #2 can be lifted.
     """
-    from vishwakarma.plugins import load_library_agents
+    from kgf.documents import parse_document
+    from kgf.errors import LibraryNotFoundError
+    from kgf.source import locate_library
 
-    agents = load_library_agents()
-    if not agents:
-        return
-    assert all(agent.role is None for agent in agents)
+    try:
+        source = locate_library(None)
+    except LibraryNotFoundError:
+        pytest.skip("claude-global-library is not on disk")
+
+    documents = sorted(source.agents_dir.glob("*/agent.md"))
+    if not documents:
+        pytest.skip("no agent documents found")
+
+    declared = [
+        path.parent.name
+        for path in documents
+        if parse_document(source, path).frontmatter.get("role")
+    ]
+    assert declared == [], f"{len(declared)} agents now declare a role: {declared[:5]}"

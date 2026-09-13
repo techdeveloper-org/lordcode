@@ -4,8 +4,8 @@ ADR-2 makes kgf a same-repo sibling that imports nothing from vishwakarma.
 The reverse direction is allowed but not unlimited: the plan's M6a contract
 says run_task may reach kgf only through its two entry points and the
 ExecutorPort adapter. Keeping every kgf import here is what makes that
-checkable -- a grep for "import kgf" outside this module and engine/phases.py
-is the whole test.
+checkable -- a grep for "import kgf" outside this module, engine/dag_executor.py
+and engine/parallel_generate.py is the whole test.
 
 What this replaces, and why it is not a refactor:
 
@@ -28,7 +28,7 @@ task, which is exactly the bug class this replaces.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from kgf.closure import Closure, build_closure
@@ -139,6 +139,7 @@ def resolve(
     intent: str = Intent.IMPLEMENT.value,
     budget_tokens: int = DEFAULT_TOKEN_BUDGET,
     forced_agent: str | None = None,
+    forced_skill: str | None = None,
     library: Path | None = None,
     on_event: OnEvent = noop_event,
 ) -> Knowledge:
@@ -153,6 +154,11 @@ def resolve(
         forced_agent: Skip ranking and use this agent. Its closure and context
             are still built, so forcing an agent does not mean forcing a
             truncated description.
+        forced_skill: Put this skill at the front of the closure, so it is the
+            first to earn context budget. It joins the closure rather than
+            arriving as a separate prompt fragment, because two mechanisms for
+            injecting library knowledge is one too many -- the fragment path is
+            what plugins.py did with an 800-char head cut.
         library: Library root; None discovers the sibling directory.
         on_event: Progress sink, so a selection and its evidence appear in the
             CLI echo and the web UI activity log.
@@ -195,6 +201,8 @@ def resolve(
         edge_path = best.edge_path
 
     closure = build_closure(graph, agent_ref)
+    if closure is not None and forced_skill:
+        closure = _with_forced_skill(graph, closure, forced_skill)
     if closure is None:
         raise KnowledgeUnavailable(f"agent {agent_ref!r} has no resolvable closure")
 
@@ -255,6 +263,83 @@ def resolve(
         on_event({"type": "kgf_defect", "detail": defect})
 
     return knowledge
+
+
+@dataclass(frozen=True)
+class Listing:
+    """One catalogue entry, for `vishwakarma skills` and the web UI."""
+
+    name: str
+    description: str
+    domain: str = ""
+    role: str = ""
+
+
+def list_skills(library: Path | None = None) -> list[Listing]:
+    """Every skill in the graph, by name.
+
+    Here rather than in the CLI because the CLI must not import kgf: M6a's
+    contract keeps the boundary at this module and a test enforces it. This
+    replaces plugins.load_all_skills, whose own loaders could never find
+    anything -- vishwakarma/skills/ has never existed -- and whose library
+    reader is now kgf's job.
+
+    No domain is reported. `Skill.domain` is a display name on 175 of 1034
+    records, which is the defect M1 fixed by reading membership from
+    SKILL_BELONGS_TO_DOMAIN edges instead; using the field here would put it
+    straight back. A listing does not justify 1034 edge lookups.
+
+    134 skills carry no description at all, so an empty one is expected rather
+    than a fault.
+    """
+    _source, graph, _log, _selector = _graph_and_selector(library)
+    return sorted(
+        (
+            Listing(name=skill.name, description=skill.description.strip())
+            for skill in graph.skills.values()
+        ),
+        key=lambda listing: listing.name,
+    )
+
+
+def list_agents(library: Path | None = None) -> list[Listing]:
+    """Every agent in the graph, with the role kgf's classifier assigns it.
+
+    The role is computed rather than read: 0 of the library's 1562 documents
+    declare one, which is the defect ADR-6 exists to work around. 147 agents
+    carry no description.
+    """
+    _source, graph, _log, _selector = _graph_and_selector(library)
+    return sorted(
+        (
+            Listing(
+                name=agent.name,
+                description=agent.description.strip(),
+                role=classify(agent.id).role,
+            )
+            for agent in graph.agents.values()
+        ),
+        key=lambda listing: listing.name,
+    )
+
+
+def _with_forced_skill(graph, closure: Closure, skill_ref: str) -> Closure:
+    """Put one skill at the head of a closure's mandatory set.
+
+    Front rather than back: context assembly spends its budget in order and
+    drops from the end, so appending a forced skill would let it be the first
+    thing dropped -- which is the opposite of forcing it.
+
+    Raises:
+        KnowledgeUnavailable: if no such skill exists. A silent miss would make
+            a typo indistinguishable from a skill that contributed nothing.
+    """
+    skill = graph.skill(skill_ref)
+    if skill is None:
+        raise KnowledgeUnavailable(f"no skill named {skill_ref!r} in the library")
+    if skill.id in closure.mandatory_skills:
+        return closure
+    return replace(closure, mandatory_skills=(skill.id,) + tuple(closure.mandatory_skills))
 
 
 def _slug(agent_ref: str) -> str:

@@ -56,7 +56,7 @@ from vishwakarma.engine.self_heal import AttemptRecord, HealResult
 from vishwakarma.languages import available_languages
 from vishwakarma.config import ConfigError
 from vishwakarma.llm_client import LLMClient
-from vishwakarma.plugins import SubAgent, load_all_skills
+from vishwakarma.engine.personas import SubAgent
 from vishwakarma.router import Router
 
 DEFAULT_LANGUAGE = "python"
@@ -566,7 +566,6 @@ class RunRuntime:
     router: Router
     client: LLMClient
     workdir: Path
-    skill: object | None = None
     subagent: SubAgent | None = None
     on_event: OnEvent = noop_event
 
@@ -656,7 +655,6 @@ def _node_implementation(runtime: RunRuntime, spec) -> dict:
                 runtime.router,
                 runtime.client,
                 context=context,
-                skill=runtime.skill,
                 subagent=runtime.subagent,
                 on_event=runtime.on_event,
             )
@@ -668,7 +666,6 @@ def _node_implementation(runtime: RunRuntime, spec) -> dict:
             runtime.router,
             runtime.client,
             context=context,
-            skill=runtime.skill,
             subagent=runtime.subagent,
             priority="interactive",
             on_event=runtime.on_event,
@@ -824,7 +821,9 @@ def run_task(
         language: Force a target stack; if None, auto-detected from the task text.
         use_rag: Whether to build lightweight file-based context from project_dir.
         project_dir: Existing project root to search for RAG context.
-        skill_name: Force a specific skill by name instead of auto-matching.
+        skill_name: Put one library skill at the front of the closure, so it
+            is first to earn context budget. There is no auto-matching left to
+            override: selection is the graph's job now.
         agent_name: Force a specific agent persona by name, skipping ranking.
             Its closure and context are still built, so forcing an agent does
             not mean forcing a truncated description.
@@ -856,13 +855,10 @@ def run_task(
         intent=intent,
         budget_tokens=context_budget_tokens,
         forced_agent=agent_name,
+        forced_skill=skill_name,
         library=library,
         on_event=on_event,
     )
-
-    skill = None
-    if skill_name is not None:
-        skill = next((s for s in load_all_skills() if s.name == skill_name), None)
 
     subagent: SubAgent | None = None
     if selection.has_persona:
@@ -894,7 +890,6 @@ def run_task(
         router=router,
         client=client,
         workdir=workdir,
-        skill=skill,
         subagent=subagent,
         on_event=on_event,
     )
@@ -942,7 +937,7 @@ def run_task(
             language=resolved_language,
             complexity=complexity,
             plan=plan,
-            skill_used=skill.name if skill else None,
+            skill_used=skill_name,
             agent_used=subagent.name if subagent else None,
             final_files=artifact.files,
             passed=True,
@@ -969,7 +964,7 @@ def run_task(
         language=resolved_language,
         complexity=complexity,
         plan=plan,
-        skill_used=skill.name if skill else None,
+        skill_used=skill_name,
         agent_used=subagent.name if subagent else None,
         final_files=heal_result.final_files,
         passed=heal_result.passed,
