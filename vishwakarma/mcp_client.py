@@ -37,6 +37,13 @@ from mcp.client.stdio import stdio_client
 
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 
+
+def _kgf_server(name: str) -> Path:
+    """Resolve one kgf MCP server from the installed kgf package."""
+    from kgf.mcp import server_path
+
+    return server_path(name)
+
 MCP_SERVERS: dict[str, Path] = {
     "uml-diagram": _WORKSPACE_ROOT / "mcp-uml-diagram" / "server.py",
     "drawio-diagram": _WORKSPACE_ROOT / "mcp-drawio-diagram" / "server.py",
@@ -44,6 +51,15 @@ MCP_SERVERS: dict[str, Path] = {
     "github-api": _WORKSPACE_ROOT / "mcp-github-api" / "server.py",
     "figma": _WORKSPACE_ROOT / "mcp-figma" / "server.py",
     "jira": _WORKSPACE_ROOT / "mcp-jira-api" / "server.py",
+    # kgf's own four servers (ADR-9). Resolved through kgf.mcp rather than
+    # _WORKSPACE_ROOT, because they ship INSIDE the kgf package: that path
+    # survives an install outside this workspace, which the six siblings above
+    # do not. ADR-2 still holds -- this is vishwakarma importing kgf, never the
+    # reverse, and nothing under kgf/mcp/ imports vishwakarma.
+    "kgf-graph": _kgf_server("kgf-graph"),
+    "kgf-selection": _kgf_server("kgf-selection"),
+    "kgf-context": _kgf_server("kgf-context"),
+    "kgf-tools": _kgf_server("kgf-tools"),
 }
 """Registry of known sibling MCP servers, resolved workspace-root-relative.
 

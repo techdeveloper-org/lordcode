@@ -751,6 +751,16 @@ class ToolRuntime:
         argv only, never a command string, and shell=False always. A string would
         mean the grant controls whether Bash may run while the string controls
         what actually runs, so "ls; rm -rf ~" would pass a check aimed at "ls".
+
+        The child gets NO stdin. Inheriting it is wrong twice over. Under kgf's
+        MCP surface the server's stdin is the client's request pipe, so an
+        inherited handle would let a granted command read the protocol traffic
+        and consume requests the server was meant to answer; and measured on
+        Windows the child did not merely see that pipe but blocked during
+        interpreter startup against the SDK's pending read on it, so every
+        command timed out having never run its first statement. No tool here
+        takes stdin input, and a command that waits for input should end rather
+        than stall until the timeout.
         """
         denial = self._check(Tool.BASH)
         if denial is not None:
@@ -774,6 +784,7 @@ class ToolRuntime:
             completed = subprocess.run(
                 argv,
                 cwd=self._sandbox.root,
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

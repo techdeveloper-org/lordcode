@@ -47,7 +47,7 @@ import pkgutil
 import kgf
 
 modules = ["kgf"]
-for info in pkgutil.iter_modules(kgf.__path__, "kgf."):
+for info in pkgutil.walk_packages(kgf.__path__, "kgf."):
     modules.append(info.name)
 
 for name in modules:
@@ -81,9 +81,15 @@ def test_no_kgf_module_names_a_forbidden_import_statically():
     A lazily-imported dependency inside a rarely-taken branch would pass the
     runtime check while still coupling the package, so the import statements
     are also read directly.
+
+    Both halves recurse, and that is a correction rather than a detail. They
+    were `glob("*.py")` and `pkgutil.iter_modules`, neither of which descends
+    into a subpackage -- so when M13 added `kgf/mcp/`, SEVEN new modules were
+    outside the boundary check while the plan recorded that they were covered
+    "automatically". `rglob` and `walk_packages` make that claim true.
     """
     offenders: list[str] = []
-    for path in sorted(KGF_DIR.glob("*.py")):
+    for path in sorted(KGF_DIR.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -94,7 +100,8 @@ def test_no_kgf_module_names_a_forbidden_import_statically():
                 continue
             for name in names:
                 if name.split(".")[0] in FORBIDDEN_ROOTS:
-                    offenders.append(f"{path.name}:{node.lineno} imports {name}")
+                    relative = path.relative_to(KGF_DIR).as_posix()
+                    offenders.append(f"{relative}:{node.lineno} imports {name}")
 
     assert not offenders, "kgf must not import its consumer: " + "; ".join(offenders)
 

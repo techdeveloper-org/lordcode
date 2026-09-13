@@ -37,6 +37,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,6 +81,7 @@ class Manifest:
     budget_tokens: int
     forced_agent: bool = False
     forced_skill: str = ""
+    correlation_id: str = ""
 
     outcome: str = ""
     agent: str = ""
@@ -106,6 +108,10 @@ class Manifest:
     dropped: tuple[str, ...] = ()
     context_defects: tuple[str, ...] = ()
     context_sha256: str = ""
+
+    def to_dict(self) -> dict:
+        """Serialise as a plain dict, for a fragment travelling over MCP."""
+        return asdict(self)
 
     def to_json(self) -> str:
         """Serialise as indented JSON, keys in declaration order."""
@@ -168,6 +174,7 @@ def build(
     budget_tokens: int = 0,
     forced_agent: bool = False,
     forced_skill: str = "",
+    correlation_id: str = "",
 ) -> Manifest:
     """Assemble a manifest from whatever stage of a run has completed.
 
@@ -189,6 +196,7 @@ def build(
         budget_tokens=budget_tokens,
         forced_agent=forced_agent,
         forced_skill=forced_skill,
+        correlation_id=correlation_id,
         outcome=selection.outcome.value if selection is not None else "",
         agent=best.agent if best is not None else (closure.agent if closure is not None else ""),
         domain=best.domain if best is not None else (closure.domain if closure is not None else ""),
@@ -260,6 +268,125 @@ def load(path: Path) -> Manifest:
         if key in known:
             known[key] = tuple(known[key])
     return Manifest(**known)
+
+
+def from_dict(payload: dict) -> Manifest:
+    """Build a Manifest from a plain dict, tolerating unknown and absent keys.
+
+    The in-memory twin of `load`, for a fragment that arrived over MCP rather
+    than off disk. Shared field-coercion logic so a fragment read from a
+    response and one read from a file cannot diverge.
+    """
+    fields = {f for f in Manifest.__dataclass_fields__}
+    known = {key: value for key, value in payload.items() if key in fields}
+
+    required = {
+        name
+        for name, spec in Manifest.__dataclass_fields__.items()
+        if spec.default is dataclasses.MISSING and spec.default_factory is dataclasses.MISSING
+    }
+    absent = sorted(required - known.keys())
+    if absent:
+        raise ValueError(f"manifest fragment is missing field(s): {', '.join(absent)}")
+
+    if "registry_digests" in known:
+        known["registry_digests"] = tuple(tuple(item) for item in known["registry_digests"])
+    for key in (
+        "edge_path", "query_terms", "disambiguation_considered", "mandatory_skills",
+        "required_skills", "optional_skills", "math_agents", "coordinating_agents",
+        "regulations", "truncated", "included", "dropped", "context_defects",
+    ):
+        if key in known:
+            known[key] = tuple(known[key])
+    return Manifest(**known)
+
+
+def merge(fragments: Sequence[Manifest]) -> Manifest:
+    """Combine fragments from one compose into a single replayable manifest.
+
+    Four stdio servers share no run: each tool call is its own process, so a
+    compose over MCP produces one fragment per stage rather than one manifest.
+    This stitches them.
+
+    Two checks, and the second is the one that is easy to miss:
+
+        registry_digests must agree -- otherwise the fragments describe
+        different libraries and a merged decision would be fiction.
+
+        correlation_id must agree -- and digests alone do NOT catch this. Two
+        fragments from DIFFERENT composes against the same library agree on
+        every digest, so without this they would merge silently into a decision
+        nobody made: one run's selection paired with another run's context.
+
+    Later fragments fill fields earlier ones left empty; a field set twice with
+    different values is a conflict and raises, because silently preferring one
+    would make the merge order significant and invisible.
+
+    Two fields are exempt from that rule, and both exemptions are narrow:
+
+        created_at describes the FRAGMENT, not the run. Four servers stamp four
+        different times for one compose, so treating a disagreement as a
+        conflict would refuse every real merge. The earliest is kept, which is
+        when the compose began.
+
+        forced_agent is resolved from the fragments that actually carry a
+        selection, not by the empty-field rule. `False` is indistinguishable
+        from unset for a bool, so under that rule any fragment claiming True
+        would win over a selection that genuinely ranked -- and a manifest that
+        says forced makes replay skip re-ranking, silently retiring the check
+        the replay exists to perform. A fragment with no outcome has no opinion.
+    """
+    if not fragments:
+        raise ValueError("no fragments to merge")
+
+    first = fragments[0]
+    for other in fragments[1:]:
+        if tuple(other.registry_digests) != tuple(first.registry_digests):
+            raise ValueError(
+                "fragments describe different libraries: registry digests disagree, "
+                "so merging them would report a decision that was never made"
+            )
+        if other.correlation_id != first.correlation_id:
+            raise ValueError(
+                f"fragments come from different composes: correlation_id "
+                f"{first.correlation_id!r} vs {other.correlation_id!r}. Registry digests "
+                "match because it is the same library, which is exactly why this check "
+                "exists -- one run's selection must not be paired with another's context."
+            )
+
+    per_fragment = ("created_at", "forced_agent")
+    merged: dict[str, Any] = dataclasses.asdict(first)
+    empties = ((), "", 0, 0.0, None, False)
+    for other in fragments[1:]:
+        for name, value in dataclasses.asdict(other).items():
+            if name in per_fragment:
+                continue
+            existing = merged.get(name)
+            if value in empties or value == ():
+                continue
+            if existing in empties or existing == ():
+                merged[name] = value
+            elif existing != value:
+                raise ValueError(
+                    f"fragments disagree on {name}: {existing!r} vs {value!r}"
+                )
+
+    merged["created_at"] = min(
+        fragment.created_at for fragment in fragments if fragment.created_at
+    ) if any(fragment.created_at for fragment in fragments) else first.created_at
+    deciding = [fragment for fragment in fragments if fragment.outcome]
+    merged["forced_agent"] = any(fragment.forced_agent for fragment in deciding)
+
+    if "registry_digests" in merged:
+        merged["registry_digests"] = tuple(tuple(item) for item in merged["registry_digests"])
+    for key in (
+        "edge_path", "query_terms", "disambiguation_considered", "mandatory_skills",
+        "required_skills", "optional_skills", "math_agents", "coordinating_agents",
+        "regulations", "truncated", "included", "dropped", "context_defects",
+    ):
+        if key in merged:
+            merged[key] = tuple(merged[key])
+    return Manifest(**merged)
 
 
 def _compare(report: ReplayReport, label: str, recorded: Any, current: Any) -> None:

@@ -309,8 +309,18 @@ class TestTheBoundary:
         """parallel_generate.py is on this list on purpose: M5.1 moved the
         union-find, Tarjan SCC, depth-tier and wave machinery into kgf/dag.py
         precisely so that module would consume it instead of keeping a second
-        copy. It is a kgf consumer by design, not a boundary leak."""
-        allowed = {"knowledge.py", "dag_executor.py", "parallel_generate.py"}
+        copy. It is a kgf consumer by design, not a boundary leak.
+
+        mcp_client.py joined it in M13, for `server_path` alone. The four kgf
+        servers must resolve from the INSTALLED package rather than through this
+        module's `_WORKSPACE_ROOT`, which is what lets them survive an install
+        outside this workspace. The direction is still one-way -- nothing under
+        `kgf/` imports vishwakarma, which the ADR-2 subprocess test asserts
+        against every kgf module -- so this is a consumer, not a cycle.
+        """
+        allowed = {
+            "knowledge.py", "dag_executor.py", "parallel_generate.py", "mcp_client.py",
+        }
         offenders = []
         for path in pathlib.Path("vishwakarma").rglob("*.py"):
             if path.name in allowed:
