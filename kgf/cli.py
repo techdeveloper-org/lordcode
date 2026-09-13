@@ -12,8 +12,13 @@ from pathlib import Path
 
 import typer
 
+from kgf import ids
+from kgf.closure import build_closure
 from kgf.errors import LibraryNotFoundError, Severity
 from kgf.loader import load_graph
+from kgf.patterns import load_decision_tree
+from kgf.roles import classify
+from kgf.select import Selector
 from kgf.source import locate_library
 from kgf.validate import summarize, validate_graph, validate_markdown
 
@@ -107,6 +112,94 @@ def skill(name: str, library: Path = _LIBRARY_OPTION) -> None:
         targets = graph.neighbours(record.id, edge_type)
         if targets:
             typer.echo(f"  {label} ({len(targets)}): {', '.join(sorted(targets)[:8])}")
+
+
+@app.command()
+def route(
+    task: str,
+    library: Path = _LIBRARY_OPTION,
+    limit: int = typer.Option(3, "--limit", help="How many ranked matches to show."),
+    complexity: str = typer.Option(
+        "", "--complexity", help="solo | squad | enterprise -- the D13 answer, used for phase pruning."
+    ),
+) -> None:
+    """Select the agent best suited to a task, showing why."""
+    graph, _log = _load(library)
+    source = locate_library(library)
+    result = Selector(graph, source).select(task, limit=limit)
+
+    typer.echo(f"outcome:    {result.outcome.value}")
+    typer.echo(f"considered: {result.considered} edge-named agents")
+    typer.echo(f"terms:      {' '.join(result.query_terms)}")
+
+    if not result.matches:
+        typer.secho("no candidate scored above zero", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=0)
+
+    for rank, match in enumerate(result.matches, start=1):
+        typer.echo(
+            f"\n{rank}. {match.name}  confidence={match.confidence:.2f}"
+            f"  domain={ids.slug_of(match.domain) or '(none)'}"
+        )
+        typer.echo(
+            f"   scores: lexical={match.lexical_score:.2f}"
+            f" top_skill={match.top_skill_score:.2f} domain={match.domain_score:.2f}"
+        )
+        if match.top_skill:
+            typer.echo(f"   strongest skill: {ids.slug_of(match.top_skill)}")
+        for step in match.edge_path:
+            typer.echo(f"   via: {step}")
+
+    best = result.best
+    assignment = classify(best.agent)
+    typer.echo(f"\nrole: {assignment.role}  ({assignment.reason})")
+
+    tree = load_decision_tree(source)
+    pattern_route = tree.route(best.domain, complexity)
+    if pattern_route.pattern is not None:
+        pattern = pattern_route.pattern
+        typer.echo(f"pattern: {pattern.id} {pattern.title}  lead={ids.slug_of(pattern.lead_agent)}")
+        typer.echo(
+            f"phases: {len(pattern_route.phases)} surviving"
+            + (f", {len(pattern_route.pruned)} pruned" if pattern_route.pruned else "")
+        )
+    else:
+        typer.echo("pattern: no D14 branch for this domain")
+
+
+@app.command()
+def closure(
+    agent_name: str = typer.Argument(..., help="Agent slug or id."),
+    library: Path = _LIBRARY_OPTION,
+) -> None:
+    """Expand an agent into the full working set the graph says it needs."""
+    graph, _log = _load(library)
+    result = build_closure(graph, agent_name)
+    if result is None:
+        typer.secho(f"no agent matching {agent_name!r}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"{result.agent}")
+    typer.echo(f"  domain:      {ids.slug_of(result.domain) or '(none)'}")
+    typer.echo(f"  skills:      {result.size} total (depth reached {result.depth_reached})")
+    typer.echo(f"    mandatory ({len(result.mandatory_skills)}): "
+               f"{', '.join(ids.slug_of(s) for s in result.mandatory_skills) or '-'}")
+    typer.echo(f"    required  ({len(result.required_skills)}): "
+               f"{', '.join(ids.slug_of(s) for s in result.required_skills) or '-'}")
+    typer.echo(f"    optional  ({len(result.optional_skills)}): "
+               f"{', '.join(ids.slug_of(s) for s in result.optional_skills) or '-'}")
+    for label, values in (
+        ("math", result.math_agents),
+        ("coordinates with", result.coordinating_agents),
+        ("regulations", result.regulations),
+    ):
+        if values:
+            typer.echo(f"  {label}: {', '.join(ids.slug_of(v) for v in values)}")
+    if result.truncated:
+        typer.secho(
+            f"  truncated {len(result.truncated)} skill(s) at the closure ceiling",
+            fg=typer.colors.YELLOW,
+        )
 
 
 @app.command()
