@@ -15,13 +15,22 @@ import typer
 from kgf import ids
 from kgf.closure import build_closure
 from kgf.context import DEFAULT_TOKEN_BUDGET, Intent, assemble_context
-from kgf.errors import LibraryNotFoundError, Severity
+from kgf.errors import LibraryNotFoundError, ProblemLog, Severity
 from kgf.loader import load_graph
 from kgf.patterns import load_decision_tree
 from kgf.roles import classify
 from kgf.select import Selector
 from kgf.source import locate_library
 from kgf.tools import grant_for
+from kgf.topology import (
+    LIBRARY_PRECEDENCE,
+    check_against_library,
+    describe,
+    load_topology,
+    seed_chain_links,
+    unsatisfied_library_precedence,
+    unsatisfied_seed_chain,
+)
 from kgf.validate import summarize, validate_graph, validate_markdown
 
 app = typer.Typer(help="Inspect and validate claude-global-library's knowledge graph.")
@@ -342,6 +351,81 @@ def validate(
         raise typer.Exit(code=1)
 
     typer.secho("\n0 FATAL -- graph is usable.", fg=typer.colors.GREEN)
+
+
+@app.command()
+def topology(
+    library: Path = _LIBRARY_OPTION,
+    validate: bool = typer.Option(
+        False, "--validate", help="Check the authored phases against the library's phases.json."
+    ),
+    prune: str = typer.Option(
+        "", "--prune", help="Comma-separated phase ids to prune, e.g. phase:A.6,phase:H."
+    ),
+    show_rationale: bool = typer.Option(
+        False, "--show-rationale", help="Print each phase's provenance and rationale."
+    ),
+) -> None:
+    """Print kgf's authored phase topology, or validate it against the library.
+
+    The topology is kgf's own data (ADR-5): the library declares 44 phases and
+    no dependency between any two of them, so this graph is authored and must
+    be re-checked against phases.json on every library bump. --validate is
+    that check, and it exits non-zero when the two disagree.
+    """
+    topo = load_topology()
+    pruned = tuple(item.strip() for item in prune.split(",") if item.strip())
+
+    unknown = tuple(item for item in pruned if item not in topo.phases)
+    if unknown:
+        typer.secho(f"not a phase id: {', '.join(unknown)}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    if validate:
+        source = locate_library(library)
+        log = ProblemLog()
+        report = check_against_library(topo, source, log)
+        unsatisfied = unsatisfied_library_precedence(topo)
+        seed_links = seed_chain_links(topo)
+        seed_failures = unsatisfied_seed_chain(topo)
+
+        typer.echo(f"library_version   {report.library_version}")
+        typer.echo(f"authored phases   {report.authored_count}")
+        typer.echo(f"library phases    {report.library_count}")
+        typer.echo(f"levels            {report.level_count}")
+        typer.echo(
+            f"traversal.md#6.3  {len(LIBRARY_PRECEDENCE) - len(unsatisfied)}"
+            f"/{len(LIBRARY_PRECEDENCE)} MUST constraints satisfied"
+        )
+        typer.echo(
+            f"seeded order      {len(seed_links) - len(seed_failures)}"
+            f"/{len(seed_links)} links satisfied"
+        )
+
+        for problem in log.problems:
+            colour = typer.colors.RED if problem.severity is Severity.FATAL else typer.colors.YELLOW
+            typer.secho(f"  {problem}", fg=colour, err=True)
+        for before, after in unsatisfied + seed_failures:
+            typer.secho(f"  FATAL TOPOLOGY_PRECEDENCE: {before} must precede {after}",
+                        fg=typer.colors.RED, err=True)
+
+        if log.fatals or unsatisfied or seed_failures or not report.ok:
+            raise typer.Exit(code=1)
+        typer.echo("")
+        typer.secho("topology agrees with the library.", fg=typer.colors.GREEN)
+        return
+
+    typer.echo(describe(topo, pruned))
+    if pruned:
+        typer.echo("")
+        typer.echo(f"pruned {len(pruned)}: {', '.join(pruned)}")
+    if show_rationale:
+        typer.echo("")
+        for phase_id, phase in topo.phases.items():
+            if phase_id in pruned:
+                continue
+            typer.echo(f"{phase_id}  [{phase.provenance}]")
+            typer.echo(f"    {phase.rationale}")
 
 
 if __name__ == "__main__":
