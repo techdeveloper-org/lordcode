@@ -43,6 +43,7 @@ original behavior: one wave, fully simultaneous, no dependency content.
 
 from __future__ import annotations
 
+from kgf.dag import CyclePolicy, DisjointSet, depth_tiers, levels
 from vishwakarma.engine.agent_runtime import AgentCoordinator, AgentSpec, RemoteLLM
 from vishwakarma.engine.calling import OnEvent, noop_event
 from vishwakarma.engine.generate import (
@@ -265,130 +266,6 @@ def _extract_manifest_dependencies(manifest: list[dict]) -> dict[str, set[str]]:
     return dependencies
 
 
-class _DisjointSet:
-    """Minimal union-find over a fixed set of items."""
-
-    def __init__(self, items: list[str]):
-        self._parent = {item: item for item in items}
-
-    def find(self, x: str) -> str:
-        while self._parent[x] != x:
-            self._parent[x] = self._parent[self._parent[x]]
-            x = self._parent[x]
-        return x
-
-    def union(self, a: str, b: str) -> None:
-        ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self._parent[ra] = rb
-
-
-def _tarjan_scc(nodes: list[str], edges: dict[str, set[str]]) -> list[list[str]]:
-    """Iterative Tarjan's SCC algorithm restricted to `nodes`.
-
-    Only edges between two members of `nodes` are followed -- edges to
-    files outside this set (e.g. a different cluster) are ignored, since
-    this is always called on one cluster's own internal subgraph.
-    """
-    node_set = set(nodes)
-    index_counter = [0]
-    stack: list[str] = []
-    on_stack: set[str] = set()
-    indices: dict[str, int] = {}
-    lowlink: dict[str, int] = {}
-    result: list[list[str]] = []
-
-    def neighbors(n: str) -> list[str]:
-        return [d for d in edges.get(n, ()) if d in node_set]
-
-    for start in nodes:
-        if start in indices:
-            continue
-        work: list[tuple[str, int]] = [(start, 0)]
-        indices[start] = lowlink[start] = index_counter[0]
-        index_counter[0] += 1
-        stack.append(start)
-        on_stack.add(start)
-
-        while work:
-            node, i = work[-1]
-            succ = neighbors(node)
-            if i < len(succ):
-                work[-1] = (node, i + 1)
-                nxt = succ[i]
-                if nxt not in indices:
-                    indices[nxt] = lowlink[nxt] = index_counter[0]
-                    index_counter[0] += 1
-                    stack.append(nxt)
-                    on_stack.add(nxt)
-                    work.append((nxt, 0))
-                elif nxt in on_stack:
-                    lowlink[node] = min(lowlink[node], indices[nxt])
-            else:
-                work.pop()
-                if work:
-                    parent = work[-1][0]
-                    lowlink[parent] = min(lowlink[parent], lowlink[node])
-                if lowlink[node] == indices[node]:
-                    component: list[str] = []
-                    while True:
-                        w = stack.pop()
-                        on_stack.discard(w)
-                        component.append(w)
-                        if w == node:
-                            break
-                    result.append(component)
-    return result
-
-
-def _depth_tiers(cluster_paths: list[str], dependencies: dict[str, set[str]]) -> list[list[str]]:
-    """Split one oversized cluster into ordered dependency-depth tiers.
-
-    Computes strongly connected components (SCCs) of the cluster's own
-    internal dependency edges first -- any cycle among the responsibility-
-    cross-reference heuristic's free-text-derived edges (a real
-    possibility, since that signal isn't provably acyclic the way the
-    naming-convention signal is) collapses into one SCC, generalizing the
-    existing 2-node mutual-dependency tie rule to an SCC of any size. Depth
-    is then computed over the SCC condensation graph, which is always
-    acyclic by construction, so it always terminates regardless of how
-    many or how large the cycles in the original per-file graph were.
-
-    Returns tiers in ascending depth order; files within a tier keep their
-    manifest (cluster) order.
-    """
-    sccs = _tarjan_scc(cluster_paths, dependencies)
-    file_to_scc = {f: i for i, comp in enumerate(sccs) for f in comp}
-
-    cluster_set = set(cluster_paths)
-    scc_deps: list[set[int]] = [set() for _ in sccs]
-    for f in cluster_paths:
-        for dep in dependencies.get(f, ()):
-            if dep in cluster_set:
-                si, sj = file_to_scc[f], file_to_scc[dep]
-                if si != sj:
-                    scc_deps[si].add(sj)
-
-    depth_cache: dict[int, int] = {}
-
-    def depth(i: int) -> int:
-        if i in depth_cache:
-            return depth_cache[i]
-        deps = scc_deps[i]
-        d = 0 if not deps else 1 + max(depth(j) for j in deps)
-        depth_cache[i] = d
-        return d
-
-    for i in range(len(sccs)):
-        depth(i)
-
-    max_depth = max(depth_cache.values()) if depth_cache else 0
-    tiers: list[list[str]] = [[] for _ in range(max_depth + 1)]
-    for f in cluster_paths:
-        tiers[depth_cache[file_to_scc[f]]].append(f)
-    return [tier for tier in tiers if tier]
-
-
 def _partition_manifest(manifest: list[dict]) -> list[list[str]]:
     """Chunk a manifest's file paths into groups for parallel generation.
 
@@ -407,7 +284,7 @@ def _partition_manifest(manifest: list[dict]) -> list[list[str]]:
     paths = [item["path"] for item in manifest]
     dependencies = _extract_manifest_dependencies(manifest)
 
-    dsu = _DisjointSet(paths)
+    dsu = DisjointSet(paths)
     for a, deps in dependencies.items():
         for b in deps:
             dsu.union(a, b)
@@ -429,7 +306,7 @@ def _partition_manifest(manifest: list[dict]) -> list[list[str]]:
         if len(cluster_paths) <= group_size:
             packing_units.append(cluster_paths)
         else:
-            packing_units.extend(_depth_tiers(cluster_paths, dependencies))
+            packing_units.extend(depth_tiers(cluster_paths, dependencies))
 
     groups: list[list[str]] = []
     for unit in packing_units:
@@ -448,17 +325,21 @@ def _compute_group_waves(
     """Assign each group to a wave, based on cross-group dependency edges.
 
     A group's wave is 1 + max(wave of every OTHER group it depends on), or
-    0 if it depends on no other group. A cross-group cycle is structurally
-    unreachable given _partition_manifest's clustering (any edge-connected
-    pair is always merged into one cluster, so a cross-group edge can only
-    point at an earlier-completed dependency, never a mutual one) -- but is
-    defensively detected and falls back to putting every group in wave 0
-    rather than recursing forever, logged via on_event.
+    0 if it depends on no other group. Scheduling is kgf.dag.levels; this
+    function's own work is projecting per-file edges onto group indices.
+
+    A cross-group cycle is structurally unreachable given
+    _partition_manifest's clustering (any edge-connected pair is always
+    merged into one cluster, so a cross-group edge can only point at an
+    earlier-completed dependency, never a mutual one) -- so the policy here
+    is COLLAPSE: every group goes into wave 0 rather than the load failing,
+    logged via on_event. kgf's authored topology uses FATAL instead, where a
+    cycle is an authoring error that must not be papered over.
     """
     n = len(groups)
     group_of: dict[str, int] = {p: gi for gi, paths in enumerate(groups) for p in paths}
 
-    group_deps: list[set[int]] = [set() for _ in range(n)]
+    group_deps: dict[int, set[int]] = {gi: set() for gi in range(n)}
     for gi, paths in enumerate(groups):
         for p in paths:
             for dep in dependencies.get(p, ()):
@@ -466,36 +347,16 @@ def _compute_group_waves(
                 if gj is not None and gj != gi:
                     group_deps[gi].add(gj)
 
-    wave_of: dict[int, int] = {}
-    visiting: set[int] = set()
-    cycle_detected = False
-
-    def wave(gi: int) -> int:
-        nonlocal cycle_detected
-        if gi in wave_of:
-            return wave_of[gi]
-        if gi in visiting:
-            cycle_detected = True
-            return 0
-        visiting.add(gi)
-        deps = group_deps[gi]
-        w = 0 if not deps else 1 + max(wave(gj) for gj in deps)
-        visiting.discard(gi)
-        wave_of[gi] = w
-        return w
-
-    for gi in range(n):
-        wave(gi)
-
-    if cycle_detected:
+    def report(cycles: list[list[int]]) -> None:
         on_event({"type": "dependency_cycle_fallback", "group_count": n})
-        wave_of = {gi: 0 for gi in range(n)}
 
-    max_wave = max(wave_of.values()) if wave_of else 0
-    waves: list[list[int]] = [[] for _ in range(max_wave + 1)]
-    for gi in range(n):
-        waves[wave_of[gi]].append(gi)
-    return waves
+    waves = levels(
+        list(range(n)),
+        group_deps,
+        cycle_policy=CyclePolicy.COLLAPSE,
+        on_cycle=report,
+    )
+    return waves if waves else [[]]
 
 
 def _persona_generate_subset(
