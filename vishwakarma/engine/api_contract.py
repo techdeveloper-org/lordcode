@@ -179,9 +179,7 @@ def generate_api_contract(
 
     coordinator = AgentCoordinator(router, client, on_event=on_event)
     try:
-        process, agent_id = coordinator.spawn_agent(_persona_generate_openapi_spec, (srs, hld))
-        process.join()
-        raw = coordinator.await_result(agent_id)
+        raw = coordinator.run_agent(_persona_generate_openapi_spec, (srs, hld))
     finally:
         coordinator.stop()
 
@@ -236,11 +234,9 @@ def run_joint_validation(
     task = f"SRS:\n{srs}\n\nHLD:\n{hld}"
     coordinator = AgentCoordinator(router, client, on_event=on_event)
     try:
-        process, agent_id = coordinator.spawn_agent(
+        approved, verdict = coordinator.run_agent(
             _persona_consensus_review, (task, api_spec, 1, _API_CONTRACT_INSTRUCTION)
         )
-        process.join()
-        approved, verdict = coordinator.await_result(agent_id)
     finally:
         coordinator.stop()
 
@@ -297,11 +293,9 @@ def run_full_stack_reconciliation(
     blueprint = json.dumps(design_tokens, indent=2)
     coordinator = AgentCoordinator(router, client, on_event=on_event)
     try:
-        process, agent_id = coordinator.spawn_agent(
+        approved, verdict = coordinator.run_agent(
             _persona_consensus_review, (task, blueprint, 1, _RECONCILIATION_INSTRUCTION)
         )
-        process.join()
-        approved, verdict = coordinator.await_result(agent_id)
     finally:
         coordinator.stop()
 

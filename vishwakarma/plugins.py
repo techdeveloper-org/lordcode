@@ -63,11 +63,21 @@ class Skill:
 
 @dataclass(frozen=True)
 class SubAgent:
-    """A persona system prompt that can replace the default prompt for one role."""
+    """A persona system prompt that can replace the default prompt for one role.
+
+    role is None when the source file DECLARED no role, which is the case for
+    every persona in claude-global-library: none of its 528 agent.md files
+    carries a `role:` field. Defaulting that to "primary_coder" (as this did
+    before issue #2) made an undeclared role indistinguishable from one
+    explicitly set to the coder role, with the result that reviewer, auditor
+    and consensus personas were injected as the persona that WRITES the code
+    they exist to critique. A persona is now applied to a role only where the
+    role is stated, so an undeclared one is refused rather than guessed.
+    """
 
     name: str
     description: str
-    role: str = "primary_coder"
+    role: str | None = None
     system_prompt: str = ""
 
 
@@ -176,7 +186,7 @@ def load_agents(agents_dir: Path | None = None) -> list[SubAgent]:
             SubAgent(
                 name=frontmatter.get("name", agent_dir.name),
                 description=frontmatter.get("description", ""),
-                role=frontmatter.get("role", "primary_coder"),
+                role=frontmatter.get("role"),
                 system_prompt=body,
             )
         )

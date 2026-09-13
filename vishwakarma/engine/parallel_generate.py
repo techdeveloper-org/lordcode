@@ -157,9 +157,7 @@ def plan_file_manifest(
     """
     coordinator = AgentCoordinator(router, client, on_event=on_event)
     try:
-        process, agent_id = coordinator.spawn_agent(_persona_plan_file_manifest, (task, language, context))
-        process.join()
-        raw = coordinator.await_result(agent_id)
+        raw = coordinator.run_agent(_persona_plan_file_manifest, (task, language, context))
     finally:
         coordinator.stop()
 
