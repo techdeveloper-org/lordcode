@@ -14,6 +14,7 @@ import typer
 
 from kgf import ids
 from kgf.closure import build_closure
+from kgf.context import DEFAULT_TOKEN_BUDGET, Intent, assemble_context
 from kgf.errors import LibraryNotFoundError, Severity
 from kgf.loader import load_graph
 from kgf.patterns import load_decision_tree
@@ -200,6 +201,72 @@ def closure(
             f"  truncated {len(result.truncated)} skill(s) at the closure ceiling",
             fg=typer.colors.YELLOW,
         )
+
+
+@app.command()
+def context(
+    task: str,
+    library: Path = _LIBRARY_OPTION,
+    agent_name: str = typer.Option(
+        "", "--agent", help="Force an agent instead of selecting one for the task."
+    ),
+    intent: str = typer.Option(
+        Intent.IMPLEMENT.value, "--intent", help="implement | design | review."
+    ),
+    budget: int = typer.Option(DEFAULT_TOKEN_BUDGET, "--budget", help="Token ceiling."),
+    show_text: bool = typer.Option(False, "--show-text", help="Print the assembled context."),
+) -> None:
+    """Assemble budgeted prompt context for a task."""
+    graph, _log = _load(library)
+    source = locate_library(library)
+
+    try:
+        resolved_intent = Intent(intent.strip().lower())
+    except ValueError:
+        typer.secho(
+            f"unknown intent {intent!r}; expected one of "
+            f"{', '.join(item.value for item in Intent)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    if agent_name:
+        chosen = agent_name
+    else:
+        result = Selector(graph, source).select(task, limit=1)
+        if result.best is None:
+            typer.secho("no agent matched this task", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        chosen = result.best.agent
+        typer.echo(
+            f"selected {result.best.name} ({result.outcome.value}, "
+            f"confidence {result.best.confidence:.2f})"
+        )
+
+    agent_closure = build_closure(graph, chosen)
+    if agent_closure is None:
+        typer.secho(f"no agent matching {chosen!r}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    assembled = assemble_context(
+        graph, source, agent_closure, intent=resolved_intent, budget_tokens=budget
+    )
+    typer.echo(assembled.summary())
+
+    for item in assembled.included:
+        typer.echo(f"  + [{item.kind}] {item.tokens:>4} tok  {ids.slug_of(item.entity)} :: {item.heading}")
+
+    if assembled.defects:
+        for defect in assembled.defects:
+            typer.secho(f"  ! {defect}", fg=typer.colors.YELLOW)
+
+    if not assembled.within_budget:
+        typer.secho("assembled context exceeds its budget", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    if show_text:
+        typer.echo("\n" + assembled.text)
 
 
 @app.command()

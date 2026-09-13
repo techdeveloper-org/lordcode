@@ -35,6 +35,72 @@ FRONTMATTER_PATTERN = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.DOTALL)
 
 KEYWORDS_PATTERN = re.compile(r"Keywords:\s*(.+)", re.IGNORECASE)
 
+HEADING_PATTERN = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+
+SECTION_NUMBER_PATTERN = re.compile(r"^\s*\d+(?:\.\d+)*[.)]?\s+")
+"""Leading section numbers, stripped before a heading is matched by name.
+
+Not cosmetic. Headings in this library are numbered inconsistently -- the same
+section is written "Deep Mathematical Foundations" in 199 skill files and
+"7. Deep Mathematical Foundations", "6. ...", "8. ..." in the rest. Matching on
+the literal text finds 199 of 905; normalising the number away finds all 905.
+The same correction recovers Response Rules (+335 files), Anti-Patterns to Avoid
+(+427), Output Expectations (+332) and What Not to Do (+332).
+"""
+
+
+@dataclass(frozen=True)
+class Section:
+    """One heading and the body beneath it, down to the next heading."""
+
+    level: int
+    title: str
+    body: str
+    order: int
+
+    @property
+    def key(self) -> str:
+        """Lowercased title with any leading section number removed."""
+        return normalise_heading(self.title)
+
+    @property
+    def text(self) -> str:
+        """The section as it would appear in a prompt, heading included."""
+        return f"{'#' * self.level} {self.title}\n{self.body}".rstrip()
+
+    @property
+    def char_count(self) -> int:
+        """Length of the rendered section."""
+        return len(self.text)
+
+
+def normalise_heading(title: str) -> str:
+    """Canonical form of a heading, for matching by name."""
+    return SECTION_NUMBER_PATTERN.sub("", title).strip().lower()
+
+
+def parse_sections(body: str) -> tuple[Section, ...]:
+    """Split a document body into its headed sections, in document order.
+
+    Any preamble before the first heading is dropped: in these documents it is
+    either empty or a restatement of the frontmatter, and keeping it would give
+    every extract an unlabelled leading block that no intent asked for.
+    """
+    matches = list(HEADING_PATTERN.finditer(body))
+    sections: list[Section] = []
+    for order, match in enumerate(matches):
+        start = match.end()
+        end = matches[order + 1].start() if order + 1 < len(matches) else len(body)
+        sections.append(
+            Section(
+                level=len(match.group(1)),
+                title=match.group(2).strip(),
+                body=body[start:end].strip("\n"),
+                order=order,
+            )
+        )
+    return tuple(sections)
+
 
 @dataclass(frozen=True)
 class Document:
@@ -69,6 +135,27 @@ class Document:
             return ()
         terms = [term.strip().rstrip(".\"'") for term in match.group(1).split(",")]
         return tuple(term for term in terms if term)
+
+    @property
+    def sections(self) -> tuple[Section, ...]:
+        """The document's headed sections, in order."""
+        return parse_sections(self.body)
+
+    def section(self, *names: str) -> Section | None:
+        """First section whose normalised heading matches any of names.
+
+        Args:
+            names: Heading names, matched case-insensitively and ignoring any
+                leading section number.
+
+        Returns:
+            The matching section, or None.
+        """
+        wanted = {normalise_heading(name) for name in names}
+        for section in self.sections:
+            if section.key in wanted:
+                return section
+        return None
 
     def declared_tools(self) -> tuple[str, ...]:
         """Tools named in frontmatter, tolerating both shapes.
