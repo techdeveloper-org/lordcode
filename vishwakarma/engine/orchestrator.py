@@ -35,9 +35,10 @@ from vishwakarma.engine import rag
 from vishwakarma.engine import self_heal as self_heal_module
 from vishwakarma.engine.agent_runtime import AgentCoordinator, RemoteLLM
 from vishwakarma.engine.calling import OnEvent, call_role, noop_event
-from vishwakarma.engine.kg_routing import route_persona
 from vishwakarma.engine.executor import ExecutionResult, run_tests, write_files
 from vishwakarma.engine.generate import FileSpec, GeneratedArtifact, GenerationError
+from vishwakarma.engine.kg_routing import route_persona
+from vishwakarma.engine.personas import persona_for_role
 from vishwakarma.engine.reasoning_utils import strip_reasoning_trace
 from vishwakarma.engine.self_heal import AttemptRecord, HealResult
 from vishwakarma.languages import available_languages
@@ -604,36 +605,28 @@ def run_task(
         # and revision-feedback threading are unchanged from before.
         coordinator = AgentCoordinator(router, client, on_event=on_event)
         try:
-            process, agent_id = coordinator.spawn_agent(
+            blueprint = coordinator.run_agent(
                 _persona_solution_architect, (engineered_task, resolved_language, context, None)
             )
-            process.join()
-            blueprint = coordinator.await_result(agent_id)
             on_event({"type": "architecture_proposed", "blueprint": blueprint})
 
-            process, agent_id = coordinator.spawn_agent(
+            approved, verdict = coordinator.run_agent(
                 _persona_consensus_review, (engineered_task, blueprint, 1)
             )
-            process.join()
-            approved, verdict = coordinator.await_result(agent_id)
             on_event({"type": "consensus_verdict", "round": 1, "approved": approved, "reason": verdict})
 
             if not approved:
-                process, agent_id = coordinator.spawn_agent(
+                blueprint = coordinator.run_agent(
                     _persona_solution_architect, (engineered_task, resolved_language, context, verdict)
                 )
-                process.join()
-                blueprint = coordinator.await_result(agent_id)
                 on_event({"type": "architecture_revised", "blueprint": blueprint})
 
                 # Bounded re-review: at most one more round on the revision, then
                 # proceed regardless (self-heal on the actual code is the final
                 # backstop, not an unbounded architect<->consensus negotiation).
-                process, agent_id = coordinator.spawn_agent(
+                approved, verdict = coordinator.run_agent(
                     _persona_consensus_review, (engineered_task, blueprint, 2)
                 )
-                process.join()
-                approved, verdict = coordinator.await_result(agent_id)
                 on_event({"type": "consensus_verdict", "round": 2, "approved": approved, "reason": verdict})
         finally:
             coordinator.stop()
@@ -721,7 +714,7 @@ def run_task(
         max_attempts=max_heal_attempts,
         timeout_seconds=heal_timeout_seconds,
         coder_subagent=subagent,
-        reasoner_subagent=subagent if subagent and subagent.role == "reasoner" else None,
+        reasoner_subagent=persona_for_role(subagent, "reasoner", on_event),
         on_event=on_event,
     )
     return RunResult(

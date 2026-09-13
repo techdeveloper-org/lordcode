@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from vishwakarma.engine.agent_runtime import AgentCoordinator, RemoteLLM
 from vishwakarma.engine.calling import OnEvent, noop_event
@@ -245,12 +246,30 @@ def generate_docs(
             (diagram_type, *coordinator.spawn_agent(_persona_generate_diagram, (diagram_type, srs, hld)))
             for diagram_type in llm_diagram_types
         ]
+
+        # Drain every result BEFORE joining any process. The previous order --
+        # join all, then read all -- was the deadlock agent_runtime.py's
+        # run_agents_parallel docstring describes, and this was its worst
+        # instance in the repo: one process per diagram type (13 of them), all
+        # writing to the single shared result queue with no reader yet. Each
+        # child blocks in its Queue feeder thread once the OS pipe buffer
+        # fills, while the parent blocks in join() waiting for a child that
+        # cannot exit until somebody drains. It survived only because mermaid
+        # payloads are small enough to fit the buffer.
+        drained: list[tuple[str, Any]] = []
+        for diagram_type, _process, agent_id in spawned:
+            try:
+                drained.append((diagram_type, coordinator.await_result(agent_id)))
+            except RuntimeError as exc:
+                drained.append((diagram_type, exc))
         for _diagram_type, process, _agent_id in spawned:
             process.join()
 
-        for diagram_type, _process, agent_id in spawned:
+        for diagram_type, outcome in drained:
             try:
-                content = coordinator.await_result(agent_id)
+                if isinstance(outcome, RuntimeError):
+                    raise outcome
+                content = outcome
                 if not _has_mermaid_fence(content):
                     raise ValueError("response did not contain a valid mermaid fence")
             except (RuntimeError, ValueError) as exc:
@@ -305,9 +324,7 @@ def generate_traceability(
 
     coordinator = AgentCoordinator(router, client, on_event=on_event)
     try:
-        process, agent_id = coordinator.spawn_agent(_persona_generate_traceability, (srs, file_list))
-        process.join()
-        table = coordinator.await_result(agent_id)
+        table = coordinator.run_agent(_persona_generate_traceability, (srs, file_list))
     finally:
         coordinator.stop()
 

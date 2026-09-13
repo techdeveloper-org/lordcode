@@ -3,6 +3,13 @@ providers:
     base_url: https://api.groq.com/openai/v1
     api_key_env: GROQ_API_KEY
     rpm_budget: 30
+    # The tokens-per-minute ceiling is the binding constraint, not rpm: at
+    # primary_coder's max_tokens of 8000 (engine/generate.py MAX_CODER_TOKENS)
+    # a single call already exceeds this whole budget, so that role is paced
+    # across minutes no matter how small its prompt is. Enforced by
+    # rate_limiter.py's second bucket; omit the key entirely for a provider
+    # with no published token ceiling (a local Ollama, say).
+    tpm_budget: 6000
 
 # Switched fully to Groq (2026-09-11) -- NVIDIA NIM removed entirely.
 # NVIDIA's free tier was blocked by two separate, unresolved issues: a

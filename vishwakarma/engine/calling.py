@@ -14,7 +14,13 @@ from typing import Callable
 
 import openai
 
-from vishwakarma.llm_client import EmptyResponseError, LLMClient, ModelUnavailableError, ProviderUnavailableError
+from vishwakarma.llm_client import (
+    EmptyResponseError,
+    LLMClient,
+    ModelUnavailableError,
+    ProviderUnavailableError,
+    RateLimitExhaustedError,
+)
 from vishwakarma.router import Router
 
 logger = logging.getLogger(__name__)
@@ -127,18 +133,38 @@ def call_role(
                 api_key_env=candidate.api_key_env,
                 **call_kwargs,
             )
+        except RateLimitExhaustedError:
+            # Deliberately re-raised BEFORE the candidate-failure clause
+            # below, and deliberately without calling handle_unavailable.
+            # Every candidate for a role resolves to the same provider key
+            # here, so its budget is the thing that is exhausted, not the
+            # model: advancing the router would silently spend the role's
+            # entire fallback chain on one throttled minute and then raise
+            # ConfigError("every configured candidate is unavailable") as
+            # though the models had been withdrawn. The router's active
+            # candidate must survive a rate limit untouched.
+            on_event({**event_base, "type": "call_rate_limited"})
+            logger.error(
+                "role=%s candidate=%s/%s exhausted its rate-limit budget; "
+                "leaving the active candidate in place",
+                role,
+                candidate.provider,
+                candidate.model,
+            )
+            raise
         except (
             ModelUnavailableError,
             ProviderUnavailableError,
             EmptyResponseError,
             openai.APIError,
         ) as exc:
-            # openai.APIError (RateLimitError, InternalServerError,
-            # APITimeoutError, and other transient subclasses) only reaches
-            # here after llm_client.py's own backoff/retry loop is exhausted
-            # -- a still-busy shared free-tier pool, a transient 5xx, or a
-            # stalled connection after ~30s of retrying is exactly what the
-            # role's next candidate exists for.
+            # openai.APIError (InternalServerError, APITimeoutError, and other
+            # transient subclasses) only reaches here after llm_client.py's own
+            # backoff/retry loop is exhausted -- a still-busy shared free-tier
+            # pool, a transient 5xx, or a stalled connection after ~30s of
+            # retrying is exactly what the role's next candidate exists for.
+            # RateLimitError is NOT among them any more: it is handled above,
+            # because a shared-key quota is not a candidate-level fault.
             on_event({**event_base, "type": "call_fallback", "reason": str(exc)})
             logger.warning(
                 "role=%s candidate=%s/%s failed (%s); advancing to next candidate",

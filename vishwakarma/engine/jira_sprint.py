@@ -136,9 +136,7 @@ def create_sprint_plan(
 
     coordinator = AgentCoordinator(router, client, on_event=on_event)
     try:
-        process, agent_id = coordinator.spawn_agent(_persona_extract_functional_requirements, (srs,))
-        process.join()
-        raw = coordinator.await_result(agent_id)
+        raw = coordinator.run_agent(_persona_extract_functional_requirements, (srs,))
     finally:
         coordinator.stop()
 

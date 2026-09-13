@@ -12,6 +12,7 @@ import json
 from dataclasses import dataclass
 
 from vishwakarma.engine.calling import OnEvent, call_role, noop_event
+from vishwakarma.engine.personas import persona_for_role
 from vishwakarma.llm_client import LLMClient
 from vishwakarma.plugins import Skill, SubAgent
 from vishwakarma.router import Router
@@ -59,8 +60,9 @@ def _build_system_prompt(language: str, skill: Skill | None, subagent: SubAgent 
     ]
     if skill is not None:
         parts.append(f"Stack-specific guidance ({skill.name}):\n{skill.prompt_addition}")
-    if subagent is not None and subagent.role == "primary_coder":
-        parts.append(f"Persona override ({subagent.name}):\n{subagent.system_prompt}")
+    coder_persona = persona_for_role(subagent, "primary_coder")
+    if coder_persona is not None:
+        parts.append(f"Persona override ({coder_persona.name}):\n{coder_persona.system_prompt}")
     return "\n\n".join(parts)
 
 
