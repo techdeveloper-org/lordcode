@@ -11,6 +11,48 @@ providers:
     # with no published token ceiling (a local Ollama, say).
     tpm_budget: 6000
 
+  # The three blocks below are DEFINED BUT UNUSED: no role references them, and
+  # router.validate_startup only walks the providers a role actually names, so
+  # declaring them costs nothing at startup. Pointing a role at one is then a
+  # one-line edit rather than a code change, which is what "any LLM is just
+  # configuration" is supposed to mean.
+  #
+  # None of them has been live-tested from this account. That matters, because
+  # this file's own history records two providers whose advertised free tiers
+  # turned out not to be entitled (NVIDIA NIM, Cerebras). Treat these as
+  # syntactically correct starting points, not as verified access.
+  ollama:
+    # Local GPU inference. The reason api_key_required exists: Ollama has no
+    # key at all, and LLMClient.is_available gated purely on a non-empty env
+    # var, so this provider was unselectable by construction no matter how it
+    # was configured.
+    base_url: http://localhost:11434/v1
+    api_key_required: false
+    # A local runtime has no published ceiling and no billing, so the request
+    # budget is nominal and the token budget is omitted entirely -- which
+    # disables token accounting for it rather than inventing a limit. A cap
+    # invented here would pace a local model for no reason.
+    rpm_budget: 600
+
+  openai:
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    # Tier-1 figures. Both ceilings are per-model on OpenAI's side while this
+    # config is per-provider, so these are the conservative floor across the
+    # models a role is likely to name, not a quoted limit.
+    rpm_budget: 500
+    tpm_budget: 30000
+
+  anthropic-compatible:
+    # Anthropic's own API is not OpenAI-shaped, so this block points at an
+    # OpenAI-compatible proxy in front of it rather than at api.anthropic.com
+    # directly -- calling this provider without such a proxy will fail on the
+    # request shape, not on the key.
+    base_url: http://localhost:4000/v1
+    api_key_env: ANTHROPIC_API_KEY
+    rpm_budget: 50
+    tpm_budget: 20000
+
 # Switched fully to Groq (2026-09-11) -- NVIDIA NIM removed entirely.
 # NVIDIA's free tier was blocked by two separate, unresolved issues: a
 # platform-level 403 "Authorization failed" bug on Personal-org accounts,

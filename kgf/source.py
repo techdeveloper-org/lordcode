@@ -20,6 +20,7 @@ Encoding is explicit in both directions, and the two halves differ:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -116,23 +117,40 @@ class LibrarySource:
         """
         return path.read_text(encoding="utf-8-sig")
 
-    def fingerprint(self) -> tuple[str, tuple[tuple[str, int], ...]]:
+    def fingerprint(self) -> tuple[str, tuple[tuple[str, str], ...]]:
         """Identify this library's exact content state.
 
         Returns:
-            The library_version paired with each registry's (name, mtime_ns).
+            The library_version paired with each registry's (name, sha256).
 
         Version alone is not a content key. library_version moves per release,
         but an unreleased local edit does not move it -- and kg_version cannot
         help at all: it is `1.0.0` in every registry and is the SCHEMA version
         (derived from schema.json's own `version`, with a migration ledger at
         _master/migrations/), correctly frozen because the schema has not
-        changed. So mtimes carry the actual freshness signal.
+        changed.
+
+        Content hashes, not mtimes. This returned mtime_ns until the run
+        manifest needed it, and mtime is wrong for that: a fresh `git clone`
+        gives every file a new mtime, so a manifest keyed on mtime would report
+        drift on byte-identical content and a replay could never succeed on
+        another machine. The library's own `_discovery/index/manifest.json`
+        already establishes sha256-per-source as the convention here.
+
+        Costs one full read of the five registries, so call it when writing or
+        replaying a manifest -- not per selection.
         """
         stamps = []
         for filename in REGISTRY_FILES:
             path = self.registry_path(filename)
-            stamps.append((filename, path.stat().st_mtime_ns if path.exists() else 0))
+            digest = ""
+            if path.exists():
+                hasher = hashlib.sha256()
+                with path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1 << 20), b""):
+                        hasher.update(chunk)
+                digest = hasher.hexdigest()
+            stamps.append((filename, digest))
         return self.library_version, tuple(stamps)
 
 

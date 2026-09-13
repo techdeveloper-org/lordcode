@@ -173,9 +173,25 @@ class LLMClient:
         return api_key_env or self._providers[provider].api_key_env
 
     def is_available(self, provider: str, api_key_env: str | None = None) -> bool:
-        """Return whether the resolved API key env var is set in the environment."""
+        """Whether this provider can be called: it has its key, or needs none.
+
+        A provider declaring `api_key_required: false` is always available. A
+        local Ollama has no key to set, and gating purely on a non-empty env
+        var made it unselectable by construction -- `validate_startup` skips
+        any candidate this refuses, so the one provider class that runs without
+        spend could never be reached.
+
+        Reachability is deliberately NOT checked here. A local runtime that is
+        installed but not running would pass this and fail at call time, which
+        is the same shape as a valid key whose provider is down: the router's
+        fallback chain handles both, and a health probe on every availability
+        question would cost a network round-trip per candidate per role.
+        """
+        provider_config = self._providers.get(provider)
+        if provider_config is not None and not provider_config.api_key_required:
+            return True
         env_name = self._resolve_api_key_env(provider, api_key_env)
-        return bool(os.environ.get(env_name))
+        return bool(env_name) and bool(os.environ.get(env_name))
 
     def _get_limiter(self, provider: str, env_name: str) -> RateLimiter:
         """Lazily construct (and cache) a rate limiter for one (provider, key) pair.
@@ -203,9 +219,16 @@ class LLMClient:
             return self._clients[cache_key]
 
         cfg = self._providers[provider]
-        api_key = os.environ.get(env_name)
+        api_key = os.environ.get(env_name) if env_name else None
         if not api_key:
-            raise ProviderUnavailableError(provider, api_key_env)
+            if not cfg.api_key_required:
+                # The OpenAI SDK refuses to construct without a key, while a
+                # keyless OpenAI-compatible endpoint (Ollama) ignores whatever
+                # is sent. A placeholder satisfies the client and is never a
+                # credential, so it cannot leak one.
+                api_key = "not-required"
+            else:
+                raise ProviderUnavailableError(provider, api_key_env)
 
         client = openai.OpenAI(api_key=api_key, base_url=cfg.base_url, timeout=REQUEST_TIMEOUT_SECONDS)
         self._clients[cache_key] = client
