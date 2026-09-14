@@ -43,10 +43,21 @@ Vishwakarma falls to the role's next candidate automatically, and only
 fails with a clear `ConfigError` (naming the role and how to fix
 `models.yaml`) if every candidate for that role is gone.
 
-**Other providers.** `models.yaml` also defines `ollama`, `openai` and an
-`anthropic-compatible` block. None is wired to a role, so they cost nothing at
+**Other providers.** `models.yaml` also defines `ollama`, `openai`, `gemini` and
+an `anthropic-compatible` block. None is wired to a role, so they cost nothing at
 startup -- the router only walks providers a role actually names -- and pointing
 a role at one is a config edit rather than a code change.
+
+Two of them need their base URL read carefully, because getting it wrong fails on
+the *request shape* rather than on the key, which is a confusing way to fail.
+`gemini` points at `/v1beta/openai/` -- Google's OpenAI-compatible layer, not its
+native `/v1beta` API -- and `anthropic-compatible` points at a local proxy rather
+than at `api.anthropic.com` directly.
+
+Neither `gemini`, `openai` nor `anthropic-compatible` has been live-tested from
+this account. That caveat is not boilerplate: this configuration's own history is
+two providers (NVIDIA NIM, Cerebras) whose advertised free tiers turned out not to
+be entitled.
 
 Ollama is the reason `api_key_required: false` exists. Availability was decided
 purely by whether an API key env var was set, so a local Ollama -- which has no
