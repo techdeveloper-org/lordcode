@@ -284,7 +284,7 @@ def assemble_context(
         document = skill_document(source, skill.name)
         if not document.ok:
             # The degradation path issue #4 requires. 18 library documents are
-            # genuinely malformed and 15 of 528 agents list at least one of them
+            # genuinely malformed and 17 of 528 agents list at least one of them
             # as mandatory, so this is reached in normal operation: record the
             # defect, drop that skill, and continue rather than failing the run.
             defects.append(f"skill {skill.name}: {document.error}")
