@@ -25,6 +25,14 @@ kgf = "kgf.cli:app"
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+# Without this, bare `pytest` from the repo root collects 740 tests where
+# `pytest tests/` collects 700 -- it sweeps in `vishwakarma-output/`, the tool's
+# own generated artifacts. The recipient's most obvious command would then run a
+# suite whose contents depend on whatever was last generated, and whose pass rate
+# reflects a model's output rather than this codebase (#51).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools.packages.find]
 include = ["vishwakarma*", "kgf*"]
 
