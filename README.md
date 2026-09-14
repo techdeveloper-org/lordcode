@@ -1,8 +1,23 @@
 # Vishwakarma
 
-A personal, local-only code-generation + auto-test tool powered entirely by
-**Groq's free API** (console.groq.com). Not a git repository -- this is for
-your own local use only.
+A code-generation and auto-test tool. Describe a task in plain English and it
+writes the code **and its own tests**, runs them, and repairs the code when they
+fail -- steered by a persona and skill set selected from a 528-agent,
+1034-skill knowledge graph.
+
+Runs on **Groq's free API** (console.groq.com) with no card required. Every
+model is configuration, not code: see [Model Stack](#model-stack).
+
+**What it actually does, end to end.** From `run "add a REST endpoint for
+creating an order" --lang java` it produced a complete Maven project -- 10
+source files plus an integration test -- compiled it, ran the tests, and when
+they failed, diagnosed and fixed them on the second attempt. That is the whole
+loop, not a demo of one step.
+
+**Scope, stated honestly.** Single-user and local. It holds no server, no
+multi-tenancy and no auth; the knowledge graph it reads is a separate
+repository on disk. Running it costs model calls against whatever key is in
+`.env`.
 
 ## Setup
 
