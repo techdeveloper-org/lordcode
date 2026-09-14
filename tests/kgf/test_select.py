@@ -30,16 +30,90 @@ def selector(graph, library):
     return Selector(graph, library)
 
 
-def test_every_candidate_is_named_by_an_edge(selector, graph):
-    """The structural gate: an agent no edge mentions cannot be selected.
+def _graph_plus_orphan(graph, orphan_id="agent:orphaned_never_edge_named"):
+    """The same graph plus one agent that no edge mentions.
+
+    Built by re-constructing rather than mutating, because KnowledgeGraph
+    indexes its adjacency at construction time and a mutated dict would leave
+    the indices disagreeing with the node tables.
+    """
+    from kgf.graph import Agent, KnowledgeGraph
+
+    orphan = Agent(
+        id=orphan_id,
+        raw={
+            "id": orphan_id,
+            "name": "orphaned-never-edge-named",
+            # Deliberately stuffed with words a real query uses, so that if the
+            # gate were removed this agent could actually win on lexical score
+            # rather than merely being present and ignored.
+            "description": (
+                "spring boot rest endpoint order api java microservice database "
+                "react component python testing security deployment"
+            ),
+        },
+    )
+    return KnowledgeGraph(
+        library_version=graph.library_version,
+        agents={**graph.agents, orphan_id: orphan},
+        skills=graph.skills,
+        domains=graph.domains,
+        regulations=graph.regulations,
+        tool_tiers=graph.tool_tiers,
+        edges=graph.edges,
+    )
+
+
+def test_an_agent_no_edge_mentions_is_not_a_candidate(graph, library):
+    """The structural gate, asserted on its actual behaviour.
 
     A gate rather than a scoring term, because that is the difference that
     matters. A lucky lexical hit can outscore a weak signal; it cannot outvote
     a filter. The keyword matcher had no such filter, which is how a collision
     on the word "boot" selected a secure-boot agent for a Spring Boot task.
+
+    This replaces `candidate_count <= len(graph.agents)`, which could not fail:
+    `_edge_named_agents` only adds endpoints it has already confirmed are in
+    `graph.agents`, so the subset relation was arithmetic rather than evidence
+    (#34). Deleting the filter fails this test; it did not fail that one.
     """
-    assert selector.candidate_count > 0
-    assert selector.candidate_count <= len(graph.agents)
+    orphan_id = "agent:orphaned_never_edge_named"
+    widened = _graph_plus_orphan(graph, orphan_id)
+    selector = Selector(widened, library)
+
+    assert orphan_id in widened.agents, "the orphan must really be in the graph"
+    assert not any(
+        orphan_id in (edge.source, edge.target) for edge in widened.edges
+    ), "and genuinely unreferenced, or this asserts nothing"
+
+    # Asserted through the public surface rather than by reaching into
+    # `_candidates`: the widened graph holds one more agent than the real one,
+    # so a count equal to the original is exactly the statement that the orphan
+    # was filtered out.
+    assert len(widened.agents) == len(graph.agents) + 1
+    assert selector.candidate_count == len(graph.agents), (
+        "the orphan must be excluded, leaving exactly the real agents"
+    )
+
+    result = selector.select("add a REST endpoint for creating an order in Spring Boot")
+    assert all(match.agent != orphan_id for match in result.matches), (
+        "an agent the graph does not connect must be unselectable however well "
+        "its text happens to match"
+    )
+
+
+def test_the_gate_currently_admits_every_agent(selector, graph):
+    """Recorded because ADR-1 calls this gate load-bearing and today it is not.
+
+    Every agent in the library is named by at least one edge, so the filter
+    excludes nobody. That does not make it wrong -- it is what stops an
+    orphaned agent being selectable, which the test above proves it does -- but
+    the plan should not claim it is doing work it is not.
+
+    Stated as a relation rather than as the literal 528, so it survives the
+    library growing without needing a re-pin.
+    """
+    assert selector.candidate_count == len(graph.agents)
 
 
 def test_ordering_is_by_score_and_not_alphabetical(selector):
