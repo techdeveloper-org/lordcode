@@ -9,9 +9,10 @@ exists to prevent, and this file is the forty lines that avoid it.
 
 Every server loads the graph once per process and holds it. `cached_graph`
 already memoises per process, so repeated tool calls in one session are free;
-the cost is one build per server per spawn, about 0.28s, and a four-server
-compose therefore pays about 1.1s. That is Decision 1's price, recorded rather
-than hidden.
+the cost is one cold build per server per spawn -- see `kgf.loader`'s module
+docstring, which is the single place these figures live -- so a four-server
+compose pays roughly four times that, on the order of 0.6s. That is Decision 1's
+price, recorded rather than hidden.
 """
 
 from __future__ import annotations

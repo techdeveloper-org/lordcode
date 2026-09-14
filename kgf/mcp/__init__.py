@@ -20,10 +20,11 @@ Four servers, split by concern:
     kgf-context    what text to send          (read-only)
     kgf-tools      what may touch the disk    (the only mutating surface)
 
-The split costs about 1.1s per compose, because each server is its own process
-and pays its own graph build. It buys back context headroom on every call: a
-caller loads one server's 4-6 tool schemas rather than all 17, and
-ai-agents-core M5 prices a tool schema at 100-500 tokens.
+The split costs one cold graph build per server per compose -- see `kgf.loader`'s
+module docstring, which is the single place that figure lives -- because each
+server is its own process. It buys back context headroom on every call: a caller
+loads one server's 2-6 tool schemas rather than all 15, and ai-agents-core M5
+prices a tool schema at 100-500 tokens.
 """
 
 from kgf.mcp.settings import McpSettings, load_settings, settings_path

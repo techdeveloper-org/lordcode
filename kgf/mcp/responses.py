@@ -24,7 +24,7 @@ library agree on their registry digests and would otherwise merge into a
 decision nobody made.
 
 `manifest_fragment` appears only on the four tools that produce a decision
-worth recording. It was on all 17 in the first draft, which meant 13 responses
+worth recording. It was on all 15 in the first draft, which meant 11 responses
 carrying an empty key: kgf_stats has no decision to record, and a field that is
 empty most of the time teaches a caller to ignore it.
 
