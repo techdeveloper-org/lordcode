@@ -179,14 +179,26 @@ def run_tests(workdir: Path, language: str) -> ExecutionResult:
     # count, that count decides (#59). None means the output carried no count
     # to read, which is NOT the same as zero and must not be treated as one.
     executed = adapter.executed_test_count(completed.stdout, completed.stderr)
-    if completed.returncode == 0 and executed == 0:
+    if completed.returncode == 0 and not executed:
+        # `not executed` deliberately covers BOTH 0 and None. An absent count is
+        # not evidence of success -- it is the absence of evidence, and treating
+        # it as a pass reopened #59 through a second door: a `*Test.java` placed
+        # outside `src/test/java` satisfies the file-presence check, but Maven
+        # never compiles it, surefire prints no `Tests run:` line at all, and
+        # the run exited 0. `executed == 0` misses that case because None is not
+        # equal to zero; `not executed` catches it (#66).
+        #
+        # Only reached once test files were found, so this cannot fire on a
+        # project that legitimately has none -- that is the earlier check's job,
+        # and it reports a different and more specific fault.
+        counted = "reported running 0 tests" if executed == 0 else "reported no test count at all"
         return ExecutionResult(
             passed=False,
             stdout=completed.stdout,
             stderr=(
-                f"The '{language}' runner exited successfully but reported running 0 tests, "
-                "so nothing was actually verified. Write tests that execute against the "
-                "generated code."
+                f"The '{language}' runner exited successfully but {counted}, so nothing was "
+                "actually verified. Ensure the tests are in the location this stack's runner "
+                "collects from, and that they execute against the generated code."
             ),
             returncode=completed.returncode,
         )

@@ -6,6 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.6] - 2026-09-14
+
+### Fixed
+
+**Two regressions in the fixes that shipped hours earlier — closes #66.** Both
+have the same shape: a value meaning *"cannot tell"* was consumed as if it meant
+*"fine"*, in both cases against an adapter docstring that said explicitly it
+must not be.
+
+**#59 came back through a second door.** `executed_test_count` returns `None`
+when the runner printed no count at all, and the guard tested `executed == 0` —
+which `None` fails — so control fell through to `passed = returncode == 0`.
+Reachable exactly as the original was: a `*Test.java` outside `src/test/java`
+satisfies the file-presence check, Maven never compiles it, surefire prints no
+`Tests run:` line, and the tool reported **"All tests passed" over zero executed
+tests**. The guard now covers both zero and absent, and says which it saw,
+because they need different remedies.
+
+**#64's ratchet switched itself off.** One attempt whose output carried no
+countable signal — a dependency failure, a broken `pom.xml` — set
+`best_count = None`, which discarded the known-good champion *and* made every
+later iteration take the same branch, disabling rollback for the rest of the
+loop and shipping the unmeasurable state as "best". An unscoreable attempt is
+now skipped while the champion is kept, and surfaces as
+`heal_attempt_unscored`.
+
+The bootstrap half is the subtle one and is pinned by its own test: the branch
+keys on `best_count is None`, not `attempt_count is None`, so a run whose
+*starting* state was unscoreable still lets the first scoreable attempt
+establish the baseline. Keyed the other way, the champion would never
+initialise.
+
+Released alone, with no other change in the same commit range, so `git bisect`
+on *"did the tool ever lie about test results"* stays a one-commit answer.
+
 ## [1.0.5] - 2026-09-14
 
 ### Fixed
