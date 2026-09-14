@@ -178,12 +178,94 @@ def test_a_larger_budget_includes_at_least_as_much(graph, library, spring_closur
     assert len(large.included) >= len(small.included)
 
 
-def test_an_unparseable_document_degrades_rather_than_failing(graph, library):
-    """The path issue #4 requires, reached in normal operation.
+_USABLE_SKILL = "---\ndescription: fine\n---\n\n## Coding Guidelines\nusable prose here\n"
+_USABLE_AGENT = "---\ndescription: fine\n---\n\n## Core Capabilities\nusable prose here\n"
+_MALFORMED = '---\ndescription: "unterminated\n---\n\n## Coding Guidelines\nbody\n'
 
-    18 library documents are malformed and 17 of 528 agents list at least one of
-    them as a mandatory skill, so this is not a hypothetical: the defect is
-    recorded, that skill is dropped, and assembly continues.
+
+def _mirror_library(tmp_path, library, graph, closure, *, break_skill: str):
+    """Copy a closure's documents into a synthetic library, breaking one skill.
+
+    The graph still comes from the real registries; only the MARKDOWN is
+    synthetic. `assemble_context` takes the graph and the source as separate
+    arguments, so swapping just the source reaches the real degradation path
+    without fabricating a graph.
+
+    Names are resolved through the graph exactly as `context.py` resolves them,
+    so a change to the id-to-directory convention breaks this fixture instead of
+    quietly making it mirror the wrong files.
+    """
+    from kgf.source import LibrarySource
+
+    root = tmp_path / "library"
+    for skill_id in closure.all_skills:
+        skill = graph.skills.get(skill_id)
+        if skill is None:
+            continue
+        target = root / "skills" / skill.name / "SKILL.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if skill.name == break_skill:
+            target.write_text(_MALFORMED, encoding="utf-8")
+            continue
+        original = library.skills_dir / skill.name / "SKILL.md"
+        target.write_text(
+            original.read_text(encoding="utf-8-sig") if original.exists() else _USABLE_SKILL,
+            encoding="utf-8",
+        )
+
+    agent = graph.agent(closure.agent)
+    if agent is not None:
+        agent_target = root / "agents" / agent.name / "agent.md"
+        agent_target.parent.mkdir(parents=True, exist_ok=True)
+        original = library.agents_dir / agent.name / "agent.md"
+        agent_target.write_text(
+            original.read_text(encoding="utf-8-sig") if original.exists() else _USABLE_AGENT,
+            encoding="utf-8",
+        )
+    return LibrarySource(root=root, library_version=library.library_version)
+
+
+def test_an_unparseable_document_degrades_rather_than_failing(graph, library, tmp_path):
+    """The path issue #4 requires, against a SYNTHETIC malformed document.
+
+    This used to derive its subject from the live library and `pytest.skip` when
+    nothing was broken -- which meant repairing the library's 18 malformed files
+    would have retired the only test of this path while the suite stayed green
+    at 619 passed (#27). The behaviour now rests on a document this test writes,
+    so it cannot be switched off by fixing real data; the live library's counts
+    are asserted separately below, where a repair shows up as a changed number
+    rather than as silence.
+    """
+    closure = build_closure(graph, "spring-boot-microservices")
+    named = [
+        graph.skills[skill_id] for skill_id in closure.all_skills if skill_id in graph.skills
+    ]
+    assert len(named) >= 2, "the fixture needs a survivor to prove assembly continued"
+
+    broken = named[0]
+    synthetic = _mirror_library(
+        tmp_path, library, graph, closure, break_skill=broken.name
+    )
+    assembled = assemble_context(graph, synthetic, closure, intent=Intent.IMPLEMENT)
+
+    assert assembled.defects, "the malformed document must be recorded"
+    assert any(broken.name in defect for defect in assembled.defects)
+    assert assembled.text, "assembly must continue despite the malformed document"
+    assert any("unparseable" in item.reason for item in assembled.dropped)
+    assert any(
+        item.entity == broken.id and "unparseable" in item.reason
+        for item in assembled.dropped
+    ), "the dropped entry must name the skill that failed, not just report a drop"
+
+
+def test_the_librarys_unparseable_documents_are_counted_not_merely_survived(
+    graph, library, at_pinned_version
+):
+    """The live-library half, which owns the COUNT and nothing else.
+
+    Separated from the behaviour above on purpose. A repair at source should
+    move these numbers visibly rather than silently disarming a behavioural
+    test, which is exactly what the previous single test did.
     """
     from kgf import ids
     from kgf.validate import validate_markdown
@@ -197,15 +279,15 @@ def test_an_unparseable_document_degrades_rather_than_failing(graph, library):
             for skill_id in graph.neighbours(agent.id, "AGENT_USES_SKILL")
         )
     ]
-    if not exposed:
-        pytest.skip("the library no longer has a malformed mandatory skill")
-
-    closure = build_closure(graph, exposed[0].id)
-    assembled = assemble_context(graph, library, closure, intent=Intent.IMPLEMENT)
-
-    assert assembled.defects, "the malformed document must be recorded"
-    assert assembled.text, "assembly must continue despite the malformed document"
-    assert any("unparseable" in item.reason for item in assembled.dropped)
+    if at_pinned_version:
+        assert len(broken) == 18
+        assert len(exposed) == 17, (
+            "17 agents carry a broken MANDATORY skill. The plan recorded 32 and later "
+            "15; both were wrong, and this is the measurement."
+        )
+    else:
+        assert len(broken) >= 0
+        assert len(exposed) <= len(graph.agents)
 
 
 def test_every_intent_has_both_a_skill_and_an_agent_mapping():
