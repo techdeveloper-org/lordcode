@@ -6,6 +6,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.3] - 2026-09-14
+
+### Fixed
+
+**A run that wrote no tests reported "All tests passed" — closes #59.** Found by
+running the tool, not reading it: `run "add a REST endpoint for creating an
+order" --lang java` produced **seven Java sources and zero test files**, and
+reported success, because `mvn test` prints *"No tests to run."* and exits 0.
+
+An exit code answers *"did anything fail"*, never *"did anything run"*. So a
+generation with no tests was indistinguishable from one whose tests all passed —
+in the direction that looks like success — which falsified the headline claim
+that this tool writes the code *and its own tests*.
+
+It also corrupted self-heal: the cheapest way to make a runner exit 0 is to write
+no tests, so the repair loop was being **rewarded for deleting them**.
+
+Three independent checks now, because no single one covers every runner: test
+files must exist before the runner is invoked; a runner that documents an empty
+collection is believed (pytest's exit 5); and where the runner prints a count,
+**the count decides** — surefire's `Tests run: N` and pytest's summary are parsed,
+and exit-0-with-zero-executed is a failure. `BUILD SUCCESS` is not evidence that
+anything was verified. Maven accordingly loses `-q`, which was hiding that very
+line.
+
+Measured live after the fix, same task: **3 test files** in the correct Maven
+layout instead of none, and an honest `FAILED` on a real compile error instead of
+a false pass.
+
 ## [1.0.2] - 2026-09-14
 
 ### Fixed
