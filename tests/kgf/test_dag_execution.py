@@ -466,3 +466,98 @@ class TestUpstreamValues:
             transient_retries=1,
         )
         assert CALL_LOG == ["a", "b", "b"]
+
+
+class _WidthRecordingExecutor:
+    """Records how many specs each dispatch was handed.
+
+    The cap is about DISPATCH WIDTH, not wall-clock overlap: run_dag hands the
+    executor a slice and an executor is free to run that slice however it
+    likes. So the observable that matters is the size of each call, and this
+    records exactly that.
+    """
+
+    def __init__(self):
+        self.widths: list[int] = []
+
+    def run_level(self, specs):
+        self.widths.append(len(specs))
+        return {spec.label: f"{spec.label}:done" for spec in specs}
+
+
+def _costly(label: str, ctx: int, completion: int) -> NodeSpec:
+    """A spec whose token fields are set, so the cap is not trivially 1."""
+    return NodeSpec(
+        label=label, node_type="echo", ctx_tokens=ctx, max_completion_tokens=completion
+    )
+
+
+class TestTheConcurrencyCapIsEnforcedNotJustReported:
+    """#36. The cap was computed, warned about, event-emitted -- and ignored.
+
+    `cap` was assigned and read only by the event emitter; every run_level
+    signature takes specs alone, so the whole level was dispatched regardless.
+
+    These tests are built to be capable of failing, which the obvious version
+    is not: NodeSpec's token fields default to 0, so concurrency_cap returns 1
+    while InProcessExecutor is already sequential, and with tokens set
+    min(per_node, calls) >= k makes "at most k" a tautology. Each case below
+    therefore forces cap < len(specs) explicitly.
+    """
+
+    def test_a_level_is_dispatched_in_chunks_of_the_cap(self):
+        """6 nodes at 2000 tokens against 6000 TPM: cap 3, so 3 + 3."""
+        executor = _WidthRecordingExecutor()
+        specs = [_costly(f"n{i}", 1500, 500) for i in range(6)]
+        assert level_cap(specs, 6000) == 3, "the fixture must produce cap < 6"
+
+        report = run_dag(specs, {}, executor, tpm_budget=6000)
+
+        assert executor.widths == [3, 3]
+        assert max(executor.widths) == 3
+        assert len(report.completed) == 6, "every node must still run"
+
+    def test_the_remainder_chunk_is_not_dropped(self):
+        """5 nodes at cap 3 is 3 + 2, not 3 + 3 and not 3 alone."""
+        executor = _WidthRecordingExecutor()
+        specs = [_costly(f"n{i}", 1500, 500) for i in range(5)]
+        assert level_cap(specs, 6000) == 3
+
+        report = run_dag(specs, {}, executor, tpm_budget=6000)
+
+        assert executor.widths == [3, 2]
+        assert len(report.completed) == 5
+
+    def test_a_budget_admitting_one_call_serialises_the_level(self):
+        """The generate node's real shape: 8000 completion tokens against a
+        6000 TPM ceiling, where floor() is 0 and the clamp makes it 1."""
+        executor = _WidthRecordingExecutor()
+        specs = [_costly(f"n{i}", 2000, 8000) for i in range(4)]
+        assert level_cap(specs, 6000) == 1
+
+        run_dag(specs, {}, executor, tpm_budget=6000)
+
+        assert executor.widths == [1, 1, 1, 1]
+
+    def test_no_budget_still_dispatches_the_level_in_one_call(self):
+        """tpm_budget=0 means no accounting, so nothing is sliced -- the cap
+        must not become a throttle for callers who never asked for one."""
+        executor = _WidthRecordingExecutor()
+        specs = [_costly(f"n{i}", 1500, 500) for i in range(6)]
+
+        run_dag(specs, {}, executor, tpm_budget=0)
+
+        assert executor.widths == [6]
+
+    def test_the_emitted_cap_matches_what_was_actually_enforced(self):
+        """The event said one thing and the executor did another. That is the
+        defect; this asserts the two now agree."""
+        executor = _WidthRecordingExecutor()
+        events: list[dict] = []
+        specs = [_costly(f"n{i}", 1500, 500) for i in range(6)]
+
+        run_dag(specs, {}, executor, tpm_budget=6000, on_event=events.append)
+
+        emitted = [event for event in events if event["type"] == "level_cap"]
+        assert emitted, "the cap event must still be emitted"
+        assert max(executor.widths) == emitted[0]["cap"]
