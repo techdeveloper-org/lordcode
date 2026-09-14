@@ -44,7 +44,12 @@ providers:
     # key at all, and LLMClient.is_available gated purely on a non-empty env
     # var, so this provider was unselectable by construction no matter how it
     # was configured.
-    base_url: http://localhost:11434/v1
+    # 127.0.0.1 rather than localhost, deliberately: localhost resolves to BOTH
+    # ::1 and 127.0.0.1, so a probe against an absent local provider pays two
+    # connect attempts per try. Measured with the runtime not running -- localhost
+    # 13.8s, 127.0.0.1 7.3s, and 2.0s once the startup probe stopped retrying
+    # (#57). Nothing here depends on IPv6.
+    base_url: http://127.0.0.1:11434/v1
     api_key_required: false
     # A local runtime has no published ceiling and no billing, so the request
     # budget is nominal and the token budget is omitted entirely -- which
@@ -66,7 +71,7 @@ providers:
     # OpenAI-compatible proxy in front of it rather than at api.anthropic.com
     # directly -- calling this provider without such a proxy will fail on the
     # request shape, not on the key.
-    base_url: http://localhost:4000/v1
+    base_url: http://127.0.0.1:4000/v1
     api_key_env: ANTHROPIC_API_KEY
     rpm_budget: 50
     tpm_budget: 20000

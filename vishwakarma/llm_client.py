@@ -49,11 +49,24 @@ is the provider's own post-hoc usage report. Four characters per token is the
 standard approximation for English prose and code; it is used solely to
 decide admission order, never to report usage, so a modest error costs a
 slightly early or late admission and nothing else."""
-REQUEST_TIMEOUT_SECONDS = 120.0
+REQUEST_TIMEOUT_SECONDS = 30.0
 """Applied as httpx's connect/read/write timeout. Because every call streams
-(see chat_completion), the 'read' timeout means max seconds between chunks,
+(see chat_completion), the 'read' timeout means max seconds BETWEEN CHUNKS,
 not max total response time -- so a reasoning model that is slow but still
-producing tokens is never killed, only a genuinely stalled connection is."""
+producing tokens is never killed, only a genuinely stalled connection is.
+
+That inter-chunk reading is why 120s was far too loose: a provider emitting one
+token every 119 seconds read as perfectly healthy, and since the router advances
+only on exceptions and a slow stream raises none, such a call had no timeout, no
+error and no failover -- it simply never returned (#56). 30s is still an order of
+magnitude above any observed inter-chunk gap on a working provider.
+
+It DOES bound time-to-first-byte, which is worth recording because the obvious
+worry about the stream deadline planned in #56 is that a per-chunk check cannot
+fire when no chunk ever arrives. Measured against a socket that accepts and then
+stays silent: httpx.ReadTimeout at 4.6s against a 4s configured read timeout. So
+a server that accepts and sends nothing is killed here, by the transport, and
+only the "alive but crawling" case needs the throughput bound."""
 
 
 class ProviderUnavailableError(Exception):
@@ -241,7 +254,13 @@ class LLMClient:
             ProviderUnavailableError: If the resolved API key env var is unset.
         """
         client = self._get_client(provider, api_key_env)
-        response = client.models.list()
+        # No SDK retries on a liveness check. This asks "is the provider there",
+        # and the answer does not change on retry -- but the SDK's default of 2
+        # adds two more connect attempts plus backoff to every DEAD provider,
+        # measured at 13.8s against 4.1s without them. The caller already treats
+        # a failure here as "skip this candidate", never as fatal (#41), so a
+        # single attempt carries exactly the information it uses (#57).
+        response = client.with_options(max_retries=0).models.list()
         return {item.id for item in response.data}
 
     def chat_completion(
