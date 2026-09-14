@@ -536,6 +536,38 @@ def level_cap(
     return max(1, min(per_node, calls))
 
 
+def _run_within_cap(
+    executor: ExecutorPort, specs: Sequence[NodeSpec], cap: int
+) -> dict[str, Any]:
+    """Run a level in chunks of `cap`, merging what each chunk returns.
+
+    The cap is enforced HERE, in the core, rather than by handing a width to
+    `ExecutorPort.run_level`. Three reasons, and the last is the one that
+    matters:
+
+        adding a parameter to the port is a BREAKING change, against the
+        additive-only rule this package adopted for its own MCP surface;
+
+        concurrency width is a SCHEDULING concern, while run_level's contract
+        is "run these and do not raise" -- separate jobs, separate interfaces;
+
+        and a width an implementor is free to ignore reproduces the very
+        defect being fixed. The cap used to be computed, logged, and then
+        never applied, because nothing downstream consumed it. Moving that
+        same optionality inside the port would hide it better, not remove it.
+
+    Slicing cannot be ignored: an executor is handed at most `cap` specs and
+    has nothing to disobey. The port and both adapters are untouched, and no
+    future adapter can violate the budget.
+    """
+    if cap >= len(specs) or cap < 1:
+        return dict(executor.run_level(specs))
+    outcomes: dict[str, Any] = {}
+    for start in range(0, len(specs), cap):
+        outcomes.update(executor.run_level(specs[start : start + cap]))
+    return outcomes
+
+
 @dataclass
 class RunReport:
     """The outcome of one DAG run, and the ledger a rerun resumes from."""
@@ -678,12 +710,13 @@ def run_dag(
 
         runnable = [_with_upstream(spec, edges, report) for spec in runnable]
 
+        cap = len(runnable)
         if tpm_budget:
             cap = level_cap(runnable, tpm_budget, on_warning=note)
             if on_event is not None:
                 on_event({"type": "level_cap", "cap": cap, "nodes": len(runnable)})
 
-        outcomes = executor.run_level(runnable)
+        outcomes = _run_within_cap(executor, runnable, cap)
         pending: list[NodeSpec] = []
         for spec in runnable:
             value = outcomes.get(spec.label, KeyError(f"executor returned no result for {spec.label}"))
