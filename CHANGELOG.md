@@ -6,6 +6,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.8] - 2026-09-14
+
+### Added
+
+**The architecture decision records the code has been citing all along — closes
+#51.** Source comments justify their design with *"per ADR-2"*, *"ADR-4's
+no-cache decision"*, *"ADR-7's replay promise"*. Measured: **35 citations across
+seven ADRs**, pointing at documents that existed in no file a recipient could
+open.
+
+`docs/adr/` now holds twelve: the nine original decisions, plus three this
+codebase has come to depend on just as heavily — the failover taxonomy
+([0010](docs/adr/0010-rate-limits-are-not-candidate-failures.md)), the
+best-attempt ratchet
+([0011](docs/adr/0011-self-heal-keeps-the-best-attempt.md)), and the rule that
+absent evidence is not success
+([0012](docs/adr/0012-absent-evidence-is-not-success.md)).
+
+Each states the **accepted cost**, not only the choice. That is the half worth
+reading: several were decided against a reviewer's recommendation, and most
+record a claim that measurement falsified — the 35s load that was really 76ms,
+the `model:` field that marks math masters rather than capability tiers, the
+SSRF defences `urllib` cannot deliver as first specified.
+
+### Fixed
+
+**A bare `pytest` no longer reports on the tool's own output.** From the repo
+root it collected **740** tests where `pytest tests/` collects 700, sweeping in
+`vishwakarma-output/` — so the most obvious command ran a suite whose contents
+depended on whatever was last generated, and whose pass rate reflected a model's
+output rather than this codebase. `testpaths` is pinned.
+
 ## [1.0.7] - 2026-09-14
 
 ### Fixed

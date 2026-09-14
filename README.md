@@ -215,13 +215,29 @@ uvicorn vishwakarma.webapp.server:app --reload
 ```
 Then open http://127.0.0.1:8000 in a browser.
 
+## Why it is built this way
+
+Source comments justify their design by citing architecture decision records --
+*"per ADR-2"*, *"ADR-4's no-cache decision"*. Those records are in
+[`docs/adr/`](docs/adr/), one file each, and every one states the **accepted
+cost** rather than only the choice. Several were decided against a reviewer's
+recommendation, and a decision without its price is an assertion rather than a
+record.
+
+Start with [ADR-0002](docs/adr/0002-kgf-imports-nothing-from-vishwakarma.md)
+(`kgf` imports nothing from `vishwakarma`, enforced by a subprocess test) and
+[ADR-0012](docs/adr/0012-absent-evidence-is-not-success.md) (absent evidence is
+not success) -- the first explains the layout, the second explains why a run
+that produced no tests is reported as a failure.
+
 ## Tests
 
 ```
-pytest tests/
+pytest
 ```
 Runs fully offline against a mocked LLM client -- no API keys required, no
-quota consumed.
+quota consumed. `testpaths` is pinned to `tests/`, so a bare `pytest` does not
+sweep in `vishwakarma-output/` and report on whatever the tool last generated.
 
 ## Notes
 
