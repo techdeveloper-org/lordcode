@@ -163,11 +163,26 @@ class TestInProcessExecutor:
 
 class TestBudgetCap:
     def test_the_generate_node_floors_to_zero_and_is_clamped(self):
-        """The measured case: MAX_CODER_TOKENS = 8000 alone exceeds ~6000 TPM,
-        so this node is paced across minutes no matter the context size."""
+        """The real case: the coder node is paced across minutes either way.
+
+        Asserted at BOTH ceilings on purpose. Groq's true measured limit is
+        8000 TPM, not the 6000 this config carried until #43 -- and raising it
+        does not rescue this node, because MAX_CODER_TOKENS (8000) plus ~2000
+        of context is ~10000, which still floors to zero. So the clamp is what
+        keeps the cap at 1 rather than 0, and a cap of 0 would not be a
+        scheduling decision at all.
+        """
         warnings: list[str] = []
         assert concurrency_cap(6000, 2000, 8000, on_warning=warnings.append) == 1
         assert len(warnings) == 1
+
+        at_true_ceiling: list[str] = []
+        assert concurrency_cap(8000, 2000, 8000, on_warning=at_true_ceiling.append) == 1
+        assert len(at_true_ceiling) == 1, (
+            "the true 8000 ceiling still cannot admit one coder call, so the "
+            "warning must still fire -- raising the budget narrowed the gap "
+            "rather than closing it"
+        )
         assert "minutes per call" in warnings[0]
 
     def test_a_cheap_node_admits_many(self):
