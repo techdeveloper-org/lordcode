@@ -365,7 +365,21 @@ def heal(
         # 3 -> 1 -> 5 and the run ended worse than a state it had already
         # reached (#64).
         attempt_count = adapter.failure_count(current_result.stdout, current_result.stderr)
-        if attempt_count is None or best_count is None:
+        if attempt_count is None:
+            # This attempt cannot be scored -- a Maven dependency failure, a
+            # broken pom, an XML parse error. Skip it and KEEP the champion.
+            #
+            # The first version of this branch read `if attempt_count is None or
+            # best_count is None`, which overwrote best_count with None, so every
+            # later iteration took the same branch and the ratchet was disabled
+            # for the rest of the loop -- with the known-good state already
+            # discarded, and shipped at the end as "best" (#66). One unscoreable
+            # attempt silently switched off the whole mechanism #64 added.
+            on_event({"type": "heal_attempt_unscored", "attempt": attempt})
+        elif best_count is None:
+            # Bootstrap: the starting result was itself unscoreable, so the first
+            # attempt that CAN be scored establishes the baseline. Keyed on
+            # best_count, not attempt_count -- that distinction is the whole bug.
             best_files, best_count = current_files, attempt_count
         elif attempt_count <= best_count:
             best_files, best_count = current_files, attempt_count
