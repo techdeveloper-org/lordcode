@@ -19,6 +19,28 @@ from kgf.validate import MAX_DANGLING_OCCURRENCES, MAX_DUPLICATE_TRIPLES
 WARM_LOAD_BUDGET_MS = 300
 
 
+def test_the_pin_is_not_stale(graph, at_pinned_version, pinned_version):
+    """A stale pin must fail HERE, loudly, rather than everywhere else silently.
+
+    Every exact-count assertion in this suite is guarded by `at_pinned_version`
+    and falls back to a bounded one when it is False. That is the right design
+    for a library that moves -- but it means a stale pin does not turn the suite
+    red. It turns the measured assertions off: `null_ids == 591` becomes
+    `null_ids >= 0`, the tier clamp becomes a truthy-list check, and the four
+    grant counts are skipped entirely, all while the suite reports green.
+
+    So the pin itself needs one unguarded assertion. This is it. When it fails,
+    the fix is to re-measure the figures against the new library and move the
+    pin -- in that order -- not to widen anything.
+    """
+    assert at_pinned_version, (
+        f"library is {graph.library_version}, suite is pinned to "
+        f"{pinned_version}. While these differ, every exact-count "
+        "assertion in tests/kgf silently degrades to a bounded one. Re-measure, "
+        "then re-pin."
+    )
+
+
 def test_all_five_registries_are_loaded(graph):
     """Omitting regulations_all would dangle all 646 REGULATED_BY targets."""
     assert len(graph.agents) >= 500

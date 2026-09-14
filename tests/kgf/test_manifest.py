@@ -121,7 +121,15 @@ class TestReplayDetectsDrift:
         assert "no differences" in report.summary()
 
     def test_a_new_library_version_is_reported(self, recorded):
-        report = manifest_module.replay(dataclasses.replace(recorded, library_version="29.98.0"))
+        """The stand-in version is DERIVED, not a literal.
+
+        It used to be the literal "29.98.0" -- a version chosen because the
+        library was then at 29.97.4. The library reached 29.98.0, the two
+        matched, and a drift test stopped detecting drift. A derived value
+        cannot collide with whatever the library becomes next.
+        """
+        stale = recorded.library_version + "-earlier"
+        report = manifest_module.replay(dataclasses.replace(recorded, library_version=stale))
         assert not report.matches
         assert any("library_version" in difference for difference in report.differences)
 
@@ -177,7 +185,11 @@ class TestReplayDetectsDrift:
 
     def test_the_summary_lists_every_difference(self, recorded):
         report = manifest_module.replay(
-            dataclasses.replace(recorded, library_version="29.98.0", context_sha256="f" * 64)
+            dataclasses.replace(
+                recorded,
+                library_version=recorded.library_version + "-earlier",
+                context_sha256="f" * 64,
+            )
         )
         summary = report.summary()
         assert "2 difference(s)" in summary
