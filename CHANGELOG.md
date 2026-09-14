@@ -6,6 +6,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.2] - 2026-09-14
+
+### Fixed
+
+**A reasoning trace could invert the task classifier's answer — closes #53.**
+`strip_reasoning_trace` is applied at 17 call sites across the engine and was
+absent from exactly two: `detect_language` and `classify_complexity`, the pair
+whose parsing is most fragile. Both match by substring and both fall back
+*silently* rather than raising, so a mis-parse was invisible at runtime.
+
+Measured against the pre-fix parse, `<think>This is not complex at all, just one
+function.</think>simple` made `classify_complexity` return **`"complex"`** — the
+opposite of the model's own conclusion, because the word sat in the trace being
+discarded. That answer decides which phases run and whether generation
+parallelises, so the failure was a silently different pipeline, not a cosmetic
+one.
+
+Neither function had any test; `tests/test_orchestrator.py` stubs both wholesale
+to reach `run_task`'s branching. Eight added, calling the real functions. Both
+trace tests are verified negative controls — the language case deliberately names
+an option sorting *earlier* than the true answer, because a later one passes
+against the old code too, by luck of iteration order.
+
+**The two classification call sites no longer hardcode `reasoning_effort` —
+closes #54.** They passed `"low"` as a literal, reaching past
+`_light_reasoning_effort_for`, which exists because each Groq reasoning family
+defines that parameter differently and the wrong family's value is a hard 400.
+Behaviour-preserving today only by coincidence: the adapter independently returns
+`"low"` for the current model. It stops being a coincidence the moment
+`models.yaml` names a different one — a config edit — where the cost is a
+`BadRequestError` retried five times (31–39s) and reported as a withdrawn model.
+
 ## [1.0.1] - 2026-09-14
 
 ### Fixed
