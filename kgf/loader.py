@@ -1,11 +1,26 @@
 """Build a KnowledgeGraph from the five master registries.
 
-No disk cache, deliberately. Reading all five registries with json.load takes
-about 0.18s warm for the build, which beats the 300ms budget, so a
-cache would add an invalidation failure class to solve a problem that does not
-exist. An earlier draft proposed one keyed on kg_version -- which would not
-even have worked, since that field is `1.0.0` in every registry and never
-moves. A process-level lru_cache on load_graph() is the whole of it.
+THE CANONICAL LOAD-COST FIGURES. Every other site quotes this docstring rather
+than restating a number, because five independent prose copies of one
+measurement drifted by about 2x before anyone re-took it.
+
+Measured at library 29.98.0, with a warm OS page cache and compiled bytecode --
+which is the condition that matters operationally, since servers spawning in
+sequence on one machine are warm by construction:
+
+    warm load      ~76ms   (~31ms json parsing + ~45ms building the graph)
+    cold process   ~152ms  (~64ms importing the package + ~88ms first build)
+
+No disk cache, deliberately: a warm load sits about 4x under the 300ms budget,
+so a cache would add an invalidation failure class to solve a problem that does
+not exist. An earlier draft proposed one keyed on kg_version -- which would not
+even have worked, since that field is `1.0.0` in every registry and never moves.
+A process-level lru_cache on load_graph() is the whole of it.
+
+Re-measure rather than trusting these if they start deciding anything: the
+figures they replaced were quoted confidently at 0.11s/0.18s/0.28s and were each
+roughly twice the truth, having been carried from a cold measurement into
+sentences about a warm one.
 """
 
 from __future__ import annotations
@@ -227,11 +242,8 @@ def cached_graph(root: str | None = None) -> tuple[KnowledgeGraph, ProblemLog]:
 
     Keyed on the root string so a test pointing at a fixture library does not
     collide with the real one. There is no disk cache and no invalidation to
-    get wrong -- a fresh process re-reads, which costs about 0.28s: roughly
-    0.11s to import the package and 0.18s to build. The figure here said 80ms
-    until M13 measured a cold process rather than a json.load, which is what
-    ADR-4's 80ms actually timed. The distinction matters now that the MCP
-    surface pays this per server: a four-server compose spends about 1.1s on
-    it.
+    get wrong -- a fresh process re-reads, at the cost this module's docstring
+    records. The distinction between that cold cost and the warm one matters now
+    that the MCP surface pays it per server rather than once.
     """
     return load_graph(root)

@@ -6,6 +6,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.1] - 2026-09-14
+
+### Fixed
+
+**`pip install .` labelled the package 0.1.0 — closes #50.** `pyproject.toml`
+carried its own `version = "0.1.0"` while `VERSION` and this changelog said
+1.0.0, so a recipient installing the project received metadata announcing a
+pre-release on the day 1.0.0 shipped. `VERSION` is now the single source of truth
+and `pyproject.toml` reads it (`[tool.setuptools.dynamic]`) rather than keeping a
+copy, which removes the drift class instead of guarding against it.
+
+Found because the push gate — inert for this repo's entire life until 1.0.0 added
+`VERSION` — did its job and **blocked** this branch for having no version bump.
+
+**The warm-load budget test no longer fails on a busy machine — closes #49.** It
+took a single wall-clock sample and compared it to a fixed 300ms, and had gone
+red three times under full-suite runs (~508ms) while passing every time in
+isolation. The budget was never the problem: idle, a warm load is 73–85ms, so the
+assertion had ~4x headroom and still failed. A single sample on a machine that is
+not dedicated cannot be made reliable by any choice of ceiling.
+
+It now asserts on the **minimum of five samples** — contention can only make a
+sample slower, so the minimum estimates the uncontended cost — and prints every
+sample on failure, because `min=412 samples=[412,455,430,501,447]` and
+`min=310 samples=[310,315,312,318,311]` are different bugs.
+
+Reproduced on demand rather than assumed: 18 concurrent graph-building processes
+produced `[384, 231, 242, 559, 807]`, **three of five over budget**, so the old
+assertion had a 60% chance of failing that window and passed only on the luck of
+its draw. Pure CPU spin did *not* reproduce it — the contention that matters is
+allocator and memory pressure from concurrent processes, not busy loops.
+
+Recorded rather than oversold: **this reduces the flake, it does not eliminate
+it.** min-of-N fails with `p^N`, and at the oversubscription that produced 508ms
+no practical N helps. If it fires a fourth time the answer is a `-m perf` marker,
+not a larger N or a larger budget.
+
+### Changed
+
+**The load-cost figures were re-measured and given one canonical home.** Seven
+prose copies across four files had drifted to roughly **twice** the truth — a
+cold process is ~152ms, not 0.28s, and a four-server MCP compose ~0.6s, not 1.1s
+— and the warm figure was a cold measurement mislabelled, which understated
+ADR-4's own no-cache case by ~2.4x. `kgf/loader.py`'s module docstring is now the
+single place they are stated, with the cache condition recorded. The MCP surface
+is also correctly described as **15 tools**, not 17.
+
+---
+
 ## [1.0.0] - 2026-09-14
 
 First versioned release. The project had no `VERSION` file before this, which
@@ -109,4 +158,8 @@ silently disarm three measured assertions.
 - **No SRS.md.** Required by `rules/44` at first Step-13; deliberately not
   invented to satisfy a checklist.
 - `test_warm_load_is_within_budget` is timing-flaky under a full-suite run
-  (~508ms against a 300ms budget) while passing in 0.31–0.33s in isolation.
+  (~508ms against a 300ms budget) while passing in isolation. *Fixed in 1.0.1 —
+  see above.* The two figures first quoted here were not
+  comparable: 508ms was the assertion's own measurement, while the 0.31–0.33s
+  cited beside it was pytest's reported duration for the whole test, which
+  includes an untimed warm-up load.
