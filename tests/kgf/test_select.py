@@ -143,6 +143,70 @@ def test_heldout_set_is_frozen_and_well_formed(heldout, graph):
             assert ids.domain_id(domain) in graph.domains, f"{case['id']}: {domain}"
 
 
+class TestTheFloorIsCalibratedOnWhatProductionRanks:
+    """Issue #16. Every case here would have passed before the fix."""
+
+    def test_every_case_carries_its_engineered_form(self, heldout):
+        """Raw text alone cannot calibrate a floor applied to engineered text.
+
+        The set held only `task` until #16 -- which is how a floor measured on
+        one distribution came to be applied to another.
+        """
+        for case in heldout["cases"]:
+            assert case.get("engineered"), f"{case['id']} has no engineered form"
+            assert len(case["engineered"]) > len(case["task"]), case["id"]
+
+    def test_the_provenance_records_its_method(self, heldout):
+        """C12 wants method, date and library_version. `method` was absent."""
+        provenance = heldout["provenance"]
+        assert provenance.get("method"), "provenance must say how the set was produced"
+        assert provenance.get("engineered_model"), "and which model produced the engineered text"
+
+    def test_the_old_floor_suppressed_nothing_which_is_why_it_moved(self, heldout):
+        """The measurement that justifies the change, kept as a regression.
+
+        Not "the old floor was a bit low" -- engineered confidence bottoms out
+        at 0.4758, so a 0.45 floor admitted all 33 and reported every one of
+        the 15 wrong top-1 answers as `selected`.
+        """
+        calibration = heldout["calibration"]
+        assert calibration["previous_floor"] == 0.45
+        assert calibration["previous_floor_admitted"] == len(heldout["cases"])
+        assert calibration["engineered"]["min_confidence"] > 0.45
+
+    def test_the_shipped_floor_matches_the_frozen_calibration(self, heldout):
+        """The constant and its evidence must not drift apart."""
+        assert CONFIDENCE_FLOOR == heldout["calibration"]["chosen_floor"]
+
+    def test_engineering_shifts_the_distribution_up_without_separating_it(self, heldout):
+        """Why the fix is a re-sited threshold rather than a better one.
+
+        Mean confidence on a WRONG engineered match exceeds mean confidence on
+        a CORRECT raw one, while separation barely moves -- so no single
+        threshold works on both texts, and the only question is which text it
+        is measured against.
+        """
+        raw = heldout["calibration"]["raw"]
+        engineered = heldout["calibration"]["engineered"]
+        assert engineered["mean_confidence_wrong"] > raw["mean_confidence_correct"]
+        assert engineered["separation"] < raw["separation"] + 0.05
+
+    def test_the_interval_is_recorded_and_its_limit_is_not_hidden(self, heldout):
+        """A point estimate alone would overstate what n=33 can support.
+
+        The Clopper-Pearson lower bound sits BELOW the admit-everything base
+        rate, so the precision gain is not established at 95%. This asserts the
+        caveat is present rather than quietly dropped once it is inconvenient.
+        """
+        calibration = heldout["calibration"]
+        low, high = calibration["chosen_precision_cp95"]
+        assert low < calibration["base_rate_precision"] < high, (
+            "if the interval ever clears the base rate, say so plainly -- do not "
+            "leave this assertion asserting the opposite of the truth"
+        )
+        assert calibration["chosen_precision"] > calibration["base_rate_precision"]
+
+
 def test_no_description_cases_really_lack_a_registry_description(heldout, graph):
     """This category only means something if the registry text is genuinely absent."""
     for case in heldout["cases"]:
