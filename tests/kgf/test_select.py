@@ -217,6 +217,58 @@ def test_heldout_set_is_frozen_and_well_formed(heldout, graph):
             assert ids.domain_id(domain) in graph.domains, f"{case['id']}: {domain}"
 
 
+class TestTheEmbeddingTriggersAreMeasuredNotAsserted:
+    """M11 gates embeddings behind numeric triggers so the decision is evidence
+    rather than preference. These keep the recorded evidence honest (#38)."""
+
+    def test_the_triggers_were_measured_on_what_production_ranks(self, heldout):
+        """The previous record was taken on RAW text and got two of three wrong.
+
+        Production ranks the engineered prompt, so a trigger measured on raw
+        text decides a question nobody asked -- the same mistake as #16's floor,
+        in the same fixture.
+        """
+        trigger = heldout["kgf_result"]["embedding_trigger"]
+        assert trigger["measured_on"] == "engineered prompt"
+        assert trigger["library_version"] == heldout["calibration"]["library_version"]
+
+    def test_trigger_three_is_withdrawn_as_vacuous(self, selector, heldout):
+        """Re-derived here rather than trusted, because this is the finding.
+
+        M11 defines trigger 3 as misses where the disambiguation edges were
+        consulted and still lost, and spent a revision making it measurable.
+        Measured, it turns out the edges are consulted on EVERY query -- so the
+        condition reduces to ">=3 misses" and merely restates trigger 1.
+        """
+        consulted = sum(
+            1
+            for case in heldout["cases"]
+            if selector.select(case["engineered"], limit=3).disambiguation_considered
+        )
+        assert consulted == len(heldout["cases"]), (
+            "if disambiguation ever stops being universal, trigger 3 becomes "
+            "meaningful again and this withdrawal should be revisited"
+        )
+        trigger = heldout["kgf_result"]["embedding_trigger"]
+        assert isinstance(trigger["trigger_3_disambiguation_misses"], str)
+        assert "vacuous" in trigger["trigger_3_disambiguation_misses"]
+
+    def test_the_decision_rests_on_two_independent_triggers(self, heldout):
+        """Not three. A gate that counts a restatement of itself as corroboration
+        is overstating its own evidence."""
+        trigger = heldout["kgf_result"]["embedding_trigger"]
+        assert trigger["trigger_1_retrieval_accuracy"] is True
+        assert trigger["trigger_2_description_less_misses"] is True
+        assert trigger["any_trigger_fires"] is True
+
+    def test_top1_is_above_its_bar_and_only_top3_fires(self, heldout):
+        """Which half of trigger 1 fires is worth keeping straight: top-1 at
+        54.5% clears the 50% bar, and it is top-3 at 66.7% that misses 75%."""
+        engineered = heldout["kgf_result"]["embedding_trigger"]["engineered"]
+        assert engineered["top1_accuracy"] >= 0.50
+        assert engineered["top3_accuracy"] < 0.75
+
+
 class TestTheFloorIsCalibratedOnWhatProductionRanks:
     """Issue #16. Every case here would have passed before the fix."""
 
