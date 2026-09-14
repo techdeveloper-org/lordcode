@@ -6,6 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.4] - 2026-09-14
+
+### Fixed
+
+**Self-heal was never shown the file it was asked to fix — closes #62.** The
+Java path could not repair a project at any attempt budget, and the reason was
+not the model.
+
+The diagnosis prompt spends a 6,000-char file budget in generation order, which
+is effectively alphabetical. On a 16-file Spring project **10 files were
+omitted, including both files the compiler named** — so the reasoner was asked
+to fix code it had never seen. Two further defects in the same path, each
+sufficient alone:
+
+- `current_files = artifact.files` **replaced** the file list with whatever the
+  coder chose to rewrite, so the model's view shrank every attempt while the
+  runner kept compiling all 16 from disk;
+- the history block repeated the whole file listing per attempt, putting the
+  prompt at **~7,900 tokens against Groq's 7,000 ITPM ceiling** — five 413s, an
+  exhausted candidate chain, and a dead run.
+
+Files the failure output names now come first and are exempt from the per-file
+cap; matching is on basename **or type name**, because javac reports
+`location: variable ex of type ...OrderAlreadyExistsException` and never the
+filename. Fixes are merged rather than replacing the file list, and history
+carries what changed plus the error instead of another copy of the source.
+
+Measured on the project that exposed it: prompt **7,912 → 3,957 tokens**, broken
+files **omitted → shown in full**, visible lines of the broken file **41 → 103**,
+and **3 of the 4 original compile errors now get fixed where previously none
+could be**.
+
+Not yet green: the loop now converges and then oscillates — an attempt that
+fixes one file can break another it had already changed. Tracked separately.
+
 ## [1.0.3] - 2026-09-14
 
 ### Fixed
