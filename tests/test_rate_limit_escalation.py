@@ -17,13 +17,15 @@ import pytest
 from vishwakarma.config import ModelConfig, ProviderConfig, RoleCandidate
 from vishwakarma.engine.calling import call_role
 from vishwakarma.llm_client import (
+    ModelUnavailableError,
     RATE_LIMIT_WALL_CLOCK_SECONDS,
     LLMClient,
     RateLimitExhaustedError,
     _retry_after_seconds,
     estimate_call_tokens,
 )
-from vishwakarma.router import Router
+from vishwakarma.config import ConfigError
+from vishwakarma.router import ProviderTroubleError, Router
 
 MESSAGES = [{"role": "user", "content": "hello"}]
 
@@ -166,3 +168,101 @@ def test_estimate_call_tokens_counts_prompt_and_completion():
     assert estimate_call_tokens(messages, max_tokens=8000) == 100 + 8000
     assert estimate_call_tokens(messages, max_tokens=None) == 100
     assert estimate_call_tokens([{"role": "user", "content": None}], max_tokens=None) == 0
+
+
+def _server_error() -> openai.InternalServerError:
+    """A real transient 5xx -- the class llm_client raises after its own retries."""
+    response = httpx.Response(
+        status_code=500,
+        request=httpx.Request("POST", "https://example.test/v1/chat/completions"),
+    )
+    return openai.InternalServerError("upstream blew up", response=response, body=None)
+
+
+class _AlwaysFailingClient:
+    """Raises the same exception for every candidate, to walk the whole chain."""
+
+    def __init__(self, exc_factory):
+        self.exc_factory = exc_factory
+        self.calls = 0
+
+    def chat_completion(self, provider, model, messages, **kwargs):
+        self.calls += 1
+        raise self.exc_factory(provider, model)
+
+    def is_available(self, provider: str, api_key_env: str | None = None) -> bool:
+        return True
+
+    def list_model_ids(self, provider: str, api_key_env: str | None = None) -> set[str]:
+        return {"coder-a", "coder-b", "fast-a", "reasoner-a", "fallback-a"}
+
+
+class TestATransientMustNotSpendACandidate:
+    """#45. Observed in a real run: two transients killed it and blamed models.yaml.
+
+    The message said "every configured candidate is unavailable ... Add more
+    candidates" while the very next run of the same command succeeded and wrote
+    25 files. The configuration was never the problem.
+    """
+
+    def test_a_chain_walked_by_transients_leaves_the_index_where_it_started(self):
+        """The permanent demotion is the half that outlives the run.
+
+        _active_index has no reset anywhere, so before this fix one bad thirty
+        seconds pinned the role to its fallback model for the whole session --
+        silently, even on runs that then succeeded.
+        """
+        models = _models()
+        client = _AlwaysFailingClient(lambda p, m: _server_error())
+        router = Router(models, client)
+
+        with pytest.raises(ProviderTroubleError):
+            call_role("primary_coder", "p", [{"role": "user", "content": "x"}], router, client)
+
+        assert router.active_index("primary_coder") == 0, (
+            "a transient walk must hand the index back, not demote the role"
+        )
+        assert client.calls == 2, "both candidates should have been tried once each"
+
+    def test_the_error_does_not_blame_the_user_s_configuration(self):
+        models = _models()
+        client = _AlwaysFailingClient(lambda p, m: _server_error())
+        router = Router(models, client)
+
+        with pytest.raises(ProviderTroubleError) as excinfo:
+            call_role("primary_coder", "p", [{"role": "user", "content": "x"}], router, client)
+
+        message = str(excinfo.value)
+        assert "models.yaml" not in message, (
+            f"a transient must not tell the operator to edit working config: {message}"
+        )
+        assert "provider problem" in message
+        assert "Retry" in message
+
+    def test_a_PERMANENT_failure_still_gets_today_s_diagnosis(self):
+        """The control. If this fix swallowed the real case too, it would have
+        replaced a wrong diagnosis with no diagnosis."""
+        models = _models()
+        client = _AlwaysFailingClient(lambda p, m: ModelUnavailableError(p, m))
+        router = Router(models, client)
+
+        with pytest.raises(ConfigError) as excinfo:
+            call_role("primary_coder", "p", [{"role": "user", "content": "x"}], router, client)
+
+        message = str(excinfo.value)
+        assert not isinstance(excinfo.value, ProviderTroubleError), (
+            "a withdrawn model IS a configuration problem and must say so"
+        )
+        assert "models.yaml" in message
+        assert router.active_index("primary_coder") == 1, (
+            "a genuinely withdrawn model must still advance permanently"
+        )
+
+    def test_restore_only_rolls_back_never_forward(self):
+        """So it cannot become a second way to advance."""
+        models = _models()
+        client = _AlwaysFailingClient(lambda p, m: _server_error())
+        router = Router(models, client)
+
+        router.restore_active_index("primary_coder", 1)
+        assert router.active_index("primary_coder") == 0, "forward moves are ignored"
