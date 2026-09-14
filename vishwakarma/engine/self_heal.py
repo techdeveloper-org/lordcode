@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from vishwakarma.engine.calling import OnEvent, call_role, noop_event
 from vishwakarma.engine.executor import ExecutionResult, run_tests, write_files
+from vishwakarma.languages import get_adapter
 from vishwakarma.engine.generate import FileSpec, GenerationError, request_files_from_coder
 from vishwakarma.engine.personas import persona_for_role
 from vishwakarma.engine.reasoning_utils import strip_reasoning_trace
@@ -266,6 +267,10 @@ def heal(
     current_files = files
     current_result = result
 
+    adapter = get_adapter(language)
+    best_files = files
+    best_count = adapter.failure_count(result.stdout, result.stderr)
+
     if result.runner_missing:
         on_event(
             {
@@ -352,5 +357,41 @@ def heal(
             history.append(AttemptRecord(attempt=attempt, files=current_files, result=current_result))
             return HealResult(final_files=current_files, passed=True, attempts=history)
 
+        # Keep the best state reached, not the last one produced. Each fix is
+        # locally reasonable and the sequence need not be: an attempt can repair
+        # one file while breaking another it changed two attempts ago, and
+        # without this the loop carries that worse state forward and diagnoses
+        # from it. Measured across attempts on a Spring project, errors went
+        # 3 -> 1 -> 5 and the run ended worse than a state it had already
+        # reached (#64).
+        attempt_count = adapter.failure_count(current_result.stdout, current_result.stderr)
+        if attempt_count is None or best_count is None:
+            best_files, best_count = current_files, attempt_count
+        elif attempt_count <= best_count:
+            best_files, best_count = current_files, attempt_count
+        else:
+            on_event(
+                {
+                    "type": "heal_attempt_regressed",
+                    "attempt": attempt,
+                    "failures": attempt_count,
+                    "best": best_count,
+                }
+            )
+            # Put the better code back on disk as well as in the prompt. The
+            # runner reads the workdir, so leaving the regression written would
+            # make the next attempt diagnose the state we just rejected.
+            write_files(workdir, best_files)
+            current_files = best_files
+            current_result = run_tests(workdir, language)
+
+    # Hand back the best state reached rather than the last one attempted. The
+    # two agree whenever a regression was rolled back, but saying so explicitly
+    # keeps that true if the rollback conditions above are ever changed.
+    if best_files is not current_files:
+        write_files(workdir, best_files)
+        current_files = best_files
+        current_result = run_tests(workdir, language)
+
     history.append(AttemptRecord(attempt=len(history), files=current_files, result=current_result))
-    return HealResult(final_files=current_files, passed=False, attempts=history)
+    return HealResult(final_files=current_files, passed=current_result.passed, attempts=history)
