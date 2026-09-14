@@ -1,7 +1,7 @@
 [project]
 name = "vishwakarma"
-version = "0.1.0"
-description = "Personal local code-generation + auto-test tool with a knowledge-graph framework (kgf) over claude-global-library."
+dynamic = ["version"]
+description = "Code-generation and auto-test tool with a knowledge-graph framework (kgf) over claude-global-library."
 requires-python = ">=3.10"
 dependencies = [
     "openai>=1.40.0",
@@ -27,3 +27,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["vishwakarma*", "kgf*"]
+
+# The VERSION file is the single source of truth (rules/11 §2). Read here rather
+# than copied, because the copy had already drifted: this table said 0.1.0 while
+# VERSION and CHANGELOG said 1.0.0, so `pip install .` handed a recipient a
+# package labelled 0.1.0 on the day 1.0.0 was announced (#50).
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }

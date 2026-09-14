@@ -6,9 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [UNRELEASED]
+## [1.0.1] - 2026-09-14
 
 ### Fixed
+
+**`pip install .` labelled the package 0.1.0 — closes #50.** `pyproject.toml`
+carried its own `version = "0.1.0"` while `VERSION` and this changelog said
+1.0.0, so a recipient installing the project received metadata announcing a
+pre-release on the day 1.0.0 shipped. `VERSION` is now the single source of truth
+and `pyproject.toml` reads it (`[tool.setuptools.dynamic]`) rather than keeping a
+copy, which removes the drift class instead of guarding against it.
+
+Found because the push gate — inert for this repo's entire life until 1.0.0 added
+`VERSION` — did its job and **blocked** this branch for having no version bump.
 
 **The warm-load budget test no longer fails on a busy machine — closes #49.** It
 took a single wall-clock sample and compared it to a fixed 300ms, and had gone
@@ -148,8 +158,8 @@ silently disarm three measured assertions.
 - **No SRS.md.** Required by `rules/44` at first Step-13; deliberately not
   invented to satisfy a checklist.
 - `test_warm_load_is_within_budget` is timing-flaky under a full-suite run
-  (~508ms against a 300ms budget) while passing in isolation. *Fixed after this
-  release — see `[UNRELEASED]`.* The two figures first quoted here were not
+  (~508ms against a 300ms budget) while passing in isolation. *Fixed in 1.0.1 —
+  see above.* The two figures first quoted here were not
   comparable: 508ms was the assertion's own measurement, while the 0.31–0.33s
   cited beside it was pytest's reported duration for the whole test, which
   includes an untimed warm-up load.
