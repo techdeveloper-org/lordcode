@@ -63,21 +63,86 @@ class HealResult:
     attempts: list[AttemptRecord] = field(default_factory=list)
 
 
-def _files_block(files: list[FileSpec]) -> str:
+def _paths_named_in(output: str, files: list[FileSpec]) -> set[str]:
+    """Which generated files the failure output actually names.
+
+    Compilers and test runners say where the problem is -- javac reports
+    `.../GlobalExceptionHandler.java:[31,5] cannot find symbol`, pytest names
+    the failing module -- and that is the only signal available for deciding
+    which files matter when the whole project cannot fit in the prompt.
+
+    Matched on basename, because the runner prints absolute OS paths while a
+    FileSpec carries a repo-relative one, and the two never compare equal.
+
+    Also matched on the basename with its extension removed, because compilers
+    name TYPES rather than files for a whole class of error: javac reports
+    `cannot find symbol: method getIdempotencyKey(), location: variable ex of
+    type com.example.orders.exception.OrderAlreadyExistsException`, which never
+    contains the string "OrderAlreadyExistsException.java". Matching filenames
+    alone left exactly the file that had to change out of the prompt.
+
+    Args:
+        output: Combined stderr/stdout from the failed run.
+        files: The generated files, to match names against.
+
+    Returns:
+        The subset of `files` paths named anywhere in the output.
+    """
+    named = set()
+    for spec in files:
+        basename = spec.path.rsplit("/", 1)[-1]
+        stem = basename.rsplit(".", 1)[0]
+        if basename in output or (len(stem) > 3 and stem in output):
+            named.add(spec.path)
+    return named
+
+
+def _files_block(files: list[FileSpec], failure_output: str = "") -> str:
     """Render files as a single text block for prompt inclusion.
 
     Bounded per-file and in total (see MAX_FILE_CHARS_IN_PROMPT and
     MAX_TOTAL_FILES_CHARS_IN_PROMPT) so a larger generated project doesn't
     blow a rate-limited model's per-minute input token budget.
+
+    Files the failure output NAMES come first. Without that ordering the budget
+    was spent in whatever order the generator emitted -- effectively
+    alphabetically -- and on a real multi-file project the broken file simply
+    never reached the model. Measured on a 16-file Spring project: 10 files
+    omitted, including BOTH files the compiler named, so the reasoner was asked
+    to fix code it had never been shown and self-heal could not succeed at any
+    attempt budget (#62).
+
+    Args:
+        files: The generated files.
+        failure_output: Combined runner output, used to decide relevance. Empty
+            preserves the original order, for callers with no failure to point at.
+
+    Returns:
+        The rendered block, most-relevant first.
     """
+    named: set[str] = set()
+    ordered = files
+    if failure_output:
+        named = _paths_named_in(failure_output, files)
+        if named:
+            ordered = [f for f in files if f.path in named] + [
+                f for f in files if f.path not in named
+            ]
+
     parts = []
     total = 0
-    for f in files:
+    for f in ordered:
         remaining = MAX_TOTAL_FILES_CHARS_IN_PROMPT - total
         if remaining <= 0:
             parts.append(f"--- {f.path} --- [omitted: prompt size budget exhausted]")
             continue
-        content = _truncate(f.content, min(MAX_FILE_CHARS_IN_PROMPT, remaining))
+        # A file the runner named is exempt from the per-file cap, because the
+        # error is as likely to be at the bottom of it as the top. The observed
+        # case reported errors at lines 31, 48 and 66 of a 5,068-char file,
+        # while the 2,000-char cap showed only the first 41 lines -- the model
+        # was handed the file and still could not see the defect.
+        cap = remaining if f.path in named else min(MAX_FILE_CHARS_IN_PROMPT, remaining)
+        content = _truncate(f.content, cap)
         block = f"--- {f.path} ---\n{content}"
         total += len(block)
         parts.append(block)
@@ -85,14 +150,30 @@ def _files_block(files: list[FileSpec]) -> str:
 
 
 def _history_block(history: list[AttemptRecord]) -> str:
-    """Render the last HISTORY_LIMIT failed attempts as prior-fixes-tried text."""
+    """Render the last HISTORY_LIMIT failed attempts as prior-fixes-tried text.
+
+    Carries what each attempt CHANGED and what still broke -- not another copy
+    of the source. The current code is already in the prompt once; repeating
+    every file for every historical attempt was the single largest consumer of
+    the input budget, at HISTORY_LIMIT x the whole file block. Measured on a
+    16-file Spring project that put the diagnosis prompt at ~7,900 tokens
+    against Groq's 7,000 ITPM ceiling for `qwen/qwen3.6-27b`, so the reasoner
+    413'd five times, exhausted its candidate chain, and the run died with
+    ConfigError -- while the fix it needed was three lines (#62).
+
+    What the loop actually needs from history is "which fixes have already been
+    tried and failed", which is the file list plus the error, at a fraction of
+    the cost.
+    """
     if not history:
         return ""
     recent = history[-HISTORY_LIMIT:]
+    per_attempt_output = max(MAX_TEST_OUTPUT_CHARS_IN_PROMPT // (len(recent) or 1), 600)
     entries = [
-        f"Attempt {record.attempt} code:\n{_files_block(record.files)}\n"
-        f"Attempt {record.attempt} error:\n"
-        f"{_truncate(f'{record.result.stderr}\\n{record.result.stdout}', MAX_TEST_OUTPUT_CHARS_IN_PROMPT)}"
+        f"Attempt {record.attempt} rewrote: "
+        f"{', '.join(spec.path for spec in record.files) or '(nothing)'}\n"
+        f"Attempt {record.attempt} still failed with:\n"
+        f"{_truncate(f'{record.result.stderr}\\n{record.result.stdout}'.strip(), per_attempt_output)}"
         for record in recent
     ]
     return "\n\nPrior failed attempts (do NOT repeat these fixes):\n" + "\n\n".join(entries)
@@ -121,9 +202,10 @@ def _diagnose(
         else "You are diagnosing why generated code failed its own tests. "
         "State the root cause, then the exact fix needed."
     )
-    output_text = _truncate(f"{result.stderr}\n{result.stdout}", MAX_TEST_OUTPUT_CHARS_IN_PROMPT)
+    raw_output = f"{result.stderr}\n{result.stdout}"
+    output_text = _truncate(raw_output, MAX_TEST_OUTPUT_CHARS_IN_PROMPT)
     user_content = (
-        f"Task: {task}\n\nCurrent code and tests:\n{_files_block(files)}\n\n"
+        f"Task: {task}\n\nCurrent code and tests:\n{_files_block(files, raw_output)}\n\n"
         f"Test failure output:\n{output_text}"
         f"{_history_block(history)}"
     )
@@ -221,8 +303,12 @@ def heal(
             '{"files": [{"path": "relative/file/path", "content": "full file content"}]} '
             "-- no prose, no markdown code fences."
         )
+        # The same relevance ordering as the diagnosis, and it matters more
+        # here: this call must REWRITE the broken file, so omitting it means
+        # the fix cannot be applied however good the diagnosis was (#62).
         user_content = (
-            f"Task: {task}\n\nCurrent code and tests:\n{_files_block(current_files)}\n\n"
+            f"Task: {task}\n\nCurrent code and tests:\n"
+            f"{_files_block(current_files, f'{current_result.stderr}\n{current_result.stdout}')}\n\n"
             f"Diagnosis and required fix:\n{diagnosis}"
         )
 
@@ -250,7 +336,16 @@ def heal(
 
         write_files(workdir, artifact.files)
         current_result = run_tests(workdir, language)
-        current_files = artifact.files
+        # MERGE, never replace. A fix response carries only the files the coder
+        # chose to rewrite, but write_files leaves the rest on disk and the
+        # runner still compiles all of them. Assigning artifact.files directly
+        # shrank the model's view of its own project on every attempt -- three
+        # files back meant the next prompt showed three files out of sixteen --
+        # while the compiler kept reporting errors in the ones that had
+        # silently dropped out of sight (#62).
+        merged = {spec.path: spec for spec in current_files}
+        merged.update({spec.path: spec for spec in artifact.files})
+        current_files = list(merged.values())
         on_event({"type": "heal_attempt_result", "attempt": attempt, "passed": current_result.passed})
 
         if current_result.passed:
