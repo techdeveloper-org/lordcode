@@ -1,326 +1,860 @@
 {
+ "$comment": [
+  "FROZEN held-out evaluation set for kgf agent/domain selection.",
+  "",
+  "Authored 2026-09-13 against library_version 29.97.4, BEFORE any ranker",
+  "existed in kgf. That ordering is the point: a set written or adjusted after",
+  "tuning measures curve-fitting, not accuracy. Do not add, remove or relabel",
+  "a case to make a ranker look better. If a label is genuinely wrong, fix it",
+  "in a commit that changes NO ranker code, and say why.",
+  "",
+  "Labels are sets of acceptable domains, not single answers, because several",
+  "of these tasks legitimately sit on a boundary (a slow query is arguably",
+  "backend or database work). A case with one acceptable domain is a case where",
+  "any other answer is wrong.",
+  "",
+  "Three categories, chosen to include the classes that fail today:",
+  "  proper-noun  - names a framework or product. The easy class, and the only",
+  "                 one the existing reference implementation reliably gets",
+  "                 right: dropping 'spring boot' from a task moved it from",
+  "                 spring-boot-microservices to figma-automation-engineer.",
+  "  plain-english- no proper noun at all. The class that fails today.",
+  "  no-description- the best skill is one of the 134 skills with NO description,",
+  "                 where a lexical ranker has only name + domain to weigh. This",
+  "                 is the trigger condition for revisiting the no-embeddings",
+  "                 decision, so it has to be measurable."
+ ],
+ "provenance": {
+  "authored": "2026-09-13",
+  "library_version": "29.97.4",
+  "authored_before_ranker": true,
+  "n": 33,
+  "method": "33 cases authored by hand before the ranker was tuned, labelled by acceptable_domains rather than by a single expected answer. Raw task text scored with Selector(graph, library). Engineered text produced 2026-09-14 by the real production path -- engineer_context then engineer_prompt, groq/qwen3.6-27b via the reasoner role -- and frozen here so the floor is calibrated against the text production actually ranks.",
+  "engineered_generated": "2026-09-14",
+  "engineered_model": "groq/qwen/qwen3.6-27b (reasoner role)"
+ },
+ "baseline": {
   "$comment": [
-    "FROZEN held-out evaluation set for kgf agent/domain selection.",
-    "",
-    "Authored 2026-09-13 against library_version 29.97.4, BEFORE any ranker",
-    "existed in kgf. That ordering is the point: a set written or adjusted after",
-    "tuning measures curve-fitting, not accuracy. Do not add, remove or relabel",
-    "a case to make a ranker look better. If a label is genuinely wrong, fix it",
-    "in a commit that changes NO ranker code, and say why.",
-    "",
-    "Labels are sets of acceptable domains, not single answers, because several",
-    "of these tasks legitimately sit on a boundary (a slow query is arguably",
-    "backend or database work). A case with one acceptable domain is a case where",
-    "any other answer is wrong.",
-    "",
-    "Three categories, chosen to include the classes that fail today:",
-    "  proper-noun  - names a framework or product. The easy class, and the only",
-    "                 one the existing reference implementation reliably gets",
-    "                 right: dropping 'spring boot' from a task moved it from",
-    "                 spring-boot-microservices to figma-automation-engineer.",
-    "  plain-english- no proper noun at all. The class that fails today.",
-    "  no-description- the best skill is one of the 134 skills with NO description,",
-    "                 where a lexical ranker has only name + domain to weigh. This",
-    "                 is the trigger condition for revisiting the no-embeddings",
-    "                 decision, so it has to be measurable."
+   "Measured 2026-09-12 against claude-workflow-engine's selection/ package",
+   "at library_version 29.97.4, using load_catalogue + build_lexicon +",
+   "DomainKgAdapter + RiskSignal.unavailable(), complexity=8, limit=3.",
+   "",
+   "Recorded because it is the bar kgf must beat, and because neither figure",
+   "was re-derived during plan review -- so its provenance is pinned here",
+   "rather than quoted from memory. 8 tasks, 4 correct top-1 domains.",
+   "",
+   "The confidence pair is the justification for the calibration criterion:",
+   "a wrong answer scored 0.776 while a correct one scored 0.835. Those",
+   "populations overlap, so a low_confidence state keyed on score alone could",
+   "never fire."
   ],
-  "provenance": {
-    "authored": "2026-09-13",
-    "library_version": "29.97.4",
-    "authored_before_ranker": true,
-    "n": 33
+  "source": "claude-workflow-engine/langgraph_engine/selection",
+  "measured": "2026-09-12",
+  "library_version": "29.97.4",
+  "top1_correct": 4,
+  "top1_total": 8,
+  "top1_accuracy": 0.5,
+  "example_correct_confidence": 0.835,
+  "example_wrong_confidence": 0.776
+ },
+ "kgf_result": {
+  "$comment": [
+   "Measured 2026-09-13 at library_version 29.97.4. Recorded here so the",
+   "figure has provenance rather than living in a commit message.",
+   "",
+   "HONEST CAVEAT: the ranker was developed with this set visible, so 54.5%",
+   "is optimistic for unseen tasks. What guards against having simply fitted",
+   "33 cases is that no label was changed, no per-case rule exists, and each",
+   "design decision was made on a diagnosed mechanism -- the one change that",
+   "mattered most was fixing an ordering bug, and the one plausible-sounding",
+   "addition (a coverage factor on the agent score) was MEASURED, found to",
+   "hurt, and reverted.",
+   "",
+   "Three scoring designs were compared -- enriched agent documents,",
+   "skills-primary aggregation, and skills-primary plus a domain signal -- and",
+   "all three landed within a few points of each other while plain-english",
+   "stayed at 3-4 of 15. The ceiling is a property of this corpus, not of the",
+   "formula: the vocabulary that separates domains ('endpoint', 'repository',",
+   "'cache') is spread across many domains' skill text.",
+   "",
+   "The no-description category was PREDICTED to be the hardest and is now",
+   "the second strongest, because all 134 of those skills do have a markdown",
+   "description that the registry build dropped. Reading the markdown fixed a",
+   "class that embeddings were being reserved for."
+  ],
+  "measured": "2026-09-13",
+  "library_version": "29.97.4",
+  "top1_correct": 18,
+  "top1_total": 33,
+  "top1_accuracy": 0.545,
+  "top3_correct": 20,
+  "top3_accuracy": 0.606,
+  "by_category_top1": {
+   "proper-noun": "8/10",
+   "no-description": "6/8",
+   "plain-english": "4/15"
   },
-  "baseline": {
-    "$comment": [
-      "Measured 2026-09-12 against claude-workflow-engine's selection/ package",
-      "at library_version 29.97.4, using load_catalogue + build_lexicon +",
-      "DomainKgAdapter + RiskSignal.unavailable(), complexity=8, limit=3.",
-      "",
-      "Recorded because it is the bar kgf must beat, and because neither figure",
-      "was re-derived during plan review -- so its provenance is pinned here",
-      "rather than quoted from memory. 8 tasks, 4 correct top-1 domains.",
-      "",
-      "The confidence pair is the justification for the calibration criterion:",
-      "a wrong answer scored 0.776 while a correct one scored 0.835. Those",
-      "populations overlap, so a low_confidence state keyed on score alone could",
-      "never fire."
-    ],
-    "source": "claude-workflow-engine/langgraph_engine/selection",
-    "measured": "2026-09-12",
-    "library_version": "29.97.4",
-    "top1_correct": 4,
-    "top1_total": 8,
-    "top1_accuracy": 0.5,
-    "example_correct_confidence": 0.835,
-    "example_wrong_confidence": 0.776
+  "calibration": {
+   "mean_confidence_correct": 0.43,
+   "mean_confidence_wrong": 0.359,
+   "gap": 0.071
   },
-  "kgf_result": {
-    "$comment": [
-      "Measured 2026-09-13 at library_version 29.97.4. Recorded here so the",
-      "figure has provenance rather than living in a commit message.",
-      "",
-      "HONEST CAVEAT: the ranker was developed with this set visible, so 54.5%",
-      "is optimistic for unseen tasks. What guards against having simply fitted",
-      "33 cases is that no label was changed, no per-case rule exists, and each",
-      "design decision was made on a diagnosed mechanism -- the one change that",
-      "mattered most was fixing an ordering bug, and the one plausible-sounding",
-      "addition (a coverage factor on the agent score) was MEASURED, found to",
-      "hurt, and reverted.",
-      "",
-      "Three scoring designs were compared -- enriched agent documents,",
-      "skills-primary aggregation, and skills-primary plus a domain signal -- and",
-      "all three landed within a few points of each other while plain-english",
-      "stayed at 3-4 of 15. The ceiling is a property of this corpus, not of the",
-      "formula: the vocabulary that separates domains ('endpoint', 'repository',",
-      "'cache') is spread across many domains' skill text.",
-      "",
-      "The no-description category was PREDICTED to be the hardest and is now",
-      "the second strongest, because all 134 of those skills do have a markdown",
-      "description that the registry build dropped. Reading the markdown fixed a",
-      "class that embeddings were being reserved for."
-    ],
-    "measured": "2026-09-13",
-    "library_version": "29.97.4",
-    "top1_correct": 18,
-    "top1_total": 33,
-    "top1_accuracy": 0.545,
-    "top3_correct": 20,
-    "top3_accuracy": 0.606,
-    "by_category_top1": {
-      "proper-noun": "8/10",
-      "no-description": "6/8",
-      "plain-english": "4/15"
-    },
-    "calibration": {
-      "mean_confidence_correct": 0.43,
-      "mean_confidence_wrong": 0.359,
-      "gap": 0.071
-    },
-    "embedding_trigger": {
-      "$comment": [
-        "The plan gates embeddings behind three numeric triggers. Two fire on",
-        "this measurement, so revisiting the lexical-only decision is now a",
-        "documented, evidence-backed option rather than a preference.",
-        "",
-        "Trigger 1 (top-3 below 75%): FIRES at 60.6%.",
-        "Trigger 2 (>=3 misses among description-less skills): does NOT fire --",
-        "  6 of 8 now correct, because the markdown backfill removed the cause.",
-        "Trigger 3 (>=3 misses where disambiguation edges were consulted and",
-        "  still lost): FIRES -- 11 of 15 plain-english cases."
-      ],
-      "trigger_1_top3_below_75pct": true,
-      "trigger_2_description_less_misses": false,
-      "trigger_3_plain_english_misses": true
-    }
+  "embedding_trigger": {
+   "$comment": [
+    "The plan gates embeddings behind three numeric triggers. Two fire on",
+    "this measurement, so revisiting the lexical-only decision is now a",
+    "documented, evidence-backed option rather than a preference.",
+    "",
+    "Trigger 1 (top-3 below 75%): FIRES at 60.6%.",
+    "Trigger 2 (>=3 misses among description-less skills): does NOT fire --",
+    "  6 of 8 now correct, because the markdown backfill removed the cause.",
+    "Trigger 3 (>=3 misses where disambiguation edges were consulted and",
+    "  still lost): FIRES -- 11 of 15 plain-english cases."
+   ],
+   "trigger_1_top3_below_75pct": true,
+   "trigger_2_description_less_misses": false,
+   "trigger_3_plain_english_misses": true
+  }
+ },
+ "cases": [
+  {
+   "id": "pn-01",
+   "category": "proper-noun",
+   "task": "add a REST endpoint for creating an order in Spring Boot",
+   "acceptable_domains": [
+    "backend-engineering"
+   ],
+   "note": "The reference implementation gets this right at 0.835. Dropping the proper noun is pe-01.",
+   "engineered": "You are an expert Spring Boot developer specializing in robust REST API design and clean architecture.\n\nCRITICAL CONSTRAINT: You must use the `POST` HTTP method for the endpoint to adhere to RESTful conventions for resource creation.\n\nImplement a new REST endpoint in a Spring Boot application to create an order. The endpoint should be mapped to the path `/api/orders`. You must define the necessary components, including a `Order` DTO/Entity class with appropriate validation annotations (using `jakarta.validation` or `javax.validation`), a `OrderService` interface and implementation for business logic and persistence, and the `OrderController` containing the endpoint. The controller must inject the `OrderService` and use `@Valid` to validate the incoming request body. On successful creation, return the created `Order` object with an HTTP 201 Created status code. On validation failure, return an HTTP 400 Bad Request status code.\n\nHandle the following edge cases explicitly:\n1. Null or empty request bodies.\n2. Invalid data types in the payload, such as negative quantities or missing required fields.\n3. Database persistence failures, such as constraint violations, which should be handled gracefully (e.g., returning a 500 Internal Server Error or specific error response).\n4. Duplicate order identifiers, if applicable to the domain logic.\n\nThe output must include the complete Java code for the `Order` entity/DTO, the `OrderService` interface and its implementation, and the `OrderController`. Ensure the code is production-ready, follows standard Spring Boot conventions, and includes necessary imports.\n\nCRITICAL CONSTRAINT: You must use the `POST` HTTP method for the endpoint to adhere to RESTful conventions for resource creation."
   },
-  "cases": [
-    {
-      "id": "pn-01",
-      "category": "proper-noun",
-      "task": "add a REST endpoint for creating an order in Spring Boot",
-      "acceptable_domains": ["backend-engineering"],
-      "note": "The reference implementation gets this right at 0.835. Dropping the proper noun is pe-01."
-    },
-    {
-      "id": "pn-02",
-      "category": "proper-noun",
-      "task": "build a React component that shows a paginated user list",
-      "acceptable_domains": ["frontend-engineering"]
-    },
-    {
-      "id": "pn-03",
-      "category": "proper-noun",
-      "task": "write a Dockerfile and a Kubernetes deployment manifest for the service",
-      "acceptable_domains": ["devops-cloud"]
-    },
-    {
-      "id": "pn-04",
-      "category": "proper-noun",
-      "task": "write a Solidity contract that holds escrow payments until both parties confirm",
-      "acceptable_domains": ["solidity-engineering", "defi-blockchain"]
-    },
-    {
-      "id": "pn-05",
-      "category": "proper-noun",
-      "task": "build a Flutter screen with a bottom navigation bar and three tabs",
-      "acceptable_domains": ["dart-flutter-engineering", "mobile-engineering"]
-    },
-    {
-      "id": "pn-06",
-      "category": "proper-noun",
-      "task": "write a Terraform module for an S3 bucket with versioning enabled",
-      "acceptable_domains": ["devops-cloud"]
-    },
-    {
-      "id": "pn-07",
-      "category": "proper-noun",
-      "task": "create a Figma plugin that exports the design tokens to CSS variables",
-      "acceptable_domains": ["figma-automation", "ui-ux-design"]
-    },
-    {
-      "id": "pn-08",
-      "category": "proper-noun",
-      "task": "compile a Rust crate to WebAssembly and call it from the browser",
-      "acceptable_domains": ["webassembly-systems-engineering", "systems-programming"]
-    },
-    {
-      "id": "pn-09",
-      "category": "proper-noun",
-      "task": "write a PySpark job that aggregates the daily event stream",
-      "acceptable_domains": ["data-science", "distributed-systems-database-engineering"]
-    },
-    {
-      "id": "pn-10",
-      "category": "proper-noun",
-      "task": "add a Prometheus metric and a Grafana dashboard panel for request latency",
-      "acceptable_domains": ["sre-production-operations", "devops-cloud"]
-    },
-    {
-      "id": "pe-01",
-      "category": "plain-english",
-      "task": "add an endpoint that creates an order and returns its identifier",
-      "acceptable_domains": ["backend-engineering"],
-      "note": "pn-01 with the proper noun removed. The reference implementation answers figma-automation-engineer here."
-    },
-    {
-      "id": "pe-02",
-      "category": "plain-english",
-      "task": "the list page is slow because every row triggers its own query",
-      "acceptable_domains": ["backend-engineering", "distributed-systems-database-engineering", "architecture-quality"]
-    },
-    {
-      "id": "pe-03",
-      "category": "plain-english",
-      "task": "make the login form show a validation message underneath each field",
-      "acceptable_domains": ["frontend-engineering", "ui-ux-design"]
-    },
-    {
-      "id": "pe-04",
-      "category": "plain-english",
-      "task": "write unit tests for the order repository including its failure cases",
-      "acceptable_domains": ["quality-testing"]
-    },
-    {
-      "id": "pe-05",
-      "category": "plain-english",
-      "task": "the service runs out of memory after a few hours under load, find the leak",
-      "acceptable_domains": ["sre-production-operations", "systems-programming", "architecture-quality"]
-    },
-    {
-      "id": "pe-06",
-      "category": "plain-english",
-      "task": "add retries with exponential backoff to the outbound HTTP calls",
-      "acceptable_domains": ["backend-engineering", "sre-production-operations"]
-    },
-    {
-      "id": "pe-07",
-      "category": "plain-english",
-      "task": "encrypt the stored customer identifiers so they are unreadable at rest",
-      "acceptable_domains": ["cybersecurity", "security-governance"]
-    },
-    {
-      "id": "pe-08",
-      "category": "plain-english",
-      "task": "batch the outgoing notifications so each user gets at most one per hour",
-      "acceptable_domains": ["backend-engineering"]
-    },
-    {
-      "id": "pe-09",
-      "category": "plain-english",
-      "task": "make every page usable with only a keyboard and a screen reader",
-      "acceptable_domains": ["ui-ux-design", "frontend-engineering"]
-    },
-    {
-      "id": "pe-10",
-      "category": "plain-english",
-      "task": "translate the whole interface into Hindi and Tamil including plural forms",
-      "acceptable_domains": ["i18n-l10n-engineering", "india-dpi-indic-language-engineering"]
-    },
-    {
-      "id": "pe-11",
-      "category": "plain-english",
-      "task": "the build takes twenty minutes, work out what to cache and make it faster",
-      "acceptable_domains": ["devops-cloud", "code-quality-static-analysis", "sre-production-operations"]
-    },
-    {
-      "id": "pe-12",
-      "category": "plain-english",
-      "task": "detect when two people edit the same record at once and refuse the stale write",
-      "acceptable_domains": ["distributed-systems-database-engineering", "backend-engineering"]
-    },
-    {
-      "id": "pe-13",
-      "category": "plain-english",
-      "task": "draw the class and sequence diagrams for the checkout flow",
-      "acceptable_domains": ["uml-diagram-engineering", "architecture-quality"]
-    },
-    {
-      "id": "pe-14",
-      "category": "plain-english",
-      "task": "work out why the model confidently returns facts that are not in the source documents",
-      "acceptable_domains": ["anti-hallucination", "aiml", "foundation-model"]
-    },
-    {
-      "id": "pe-15",
-      "category": "plain-english",
-      "task": "reverse engineer this stripped binary and describe what it does on startup",
-      "acceptable_domains": ["reverse-engineering", "cryptanalysis"]
-    },
-    {
-      "id": "nd-01",
-      "category": "no-description",
-      "task": "implement a self-balancing binary search tree with deletion and prove the height bound",
-      "acceptable_domains": ["architecture-quality"],
-      "best_skill_without_description": "dsa-core"
-    },
-    {
-      "id": "nd-02",
-      "category": "no-description",
-      "task": "compute probability of default for a loan book and stage it under IFRS 9",
-      "acceptable_domains": ["finance"],
-      "best_skill_without_description": "credit-risk-core"
-    },
-    {
-      "id": "nd-03",
-      "category": "no-description",
-      "task": "price a European call option against a volatility surface",
-      "acceptable_domains": ["finance"],
-      "best_skill_without_description": "derivatives-pricing-core"
-    },
-    {
-      "id": "nd-04",
-      "category": "no-description",
-      "task": "write the bare-metal startup routine that sets up the stack and clears BSS",
-      "acceptable_domains": ["embedded-firmware-kernel", "assembly-boot"],
-      "best_skill_without_description": "bare-metal-architecture-core"
-    },
-    {
-      "id": "nd-05",
-      "category": "no-description",
-      "task": "model how an outbreak spreads through a population with waning immunity",
-      "acceptable_domains": ["healthcare"],
-      "best_skill_without_description": "epidemiology-modeling-core"
-    },
-    {
-      "id": "nd-06",
-      "category": "no-description",
-      "task": "estimate the true effect of the treatment when assignment was not random",
-      "acceptable_domains": ["data-science"],
-      "best_skill_without_description": "causal-inference-core"
-    },
-    {
-      "id": "nd-07",
-      "category": "no-description",
-      "task": "build a screening rule set that flags suspicious transaction structuring",
-      "acceptable_domains": ["finance"],
-      "best_skill_without_description": "aml-fraud-detection-core"
-    },
-    {
-      "id": "nd-08",
-      "category": "no-description",
-      "task": "work out the sample size needed to detect that effect with adequate power",
-      "acceptable_domains": ["healthcare", "data-science"],
-      "best_skill_without_description": "biostatistics-core"
-    }
+  {
+   "id": "pn-02",
+   "category": "proper-noun",
+   "task": "build a React component that shows a paginated user list",
+   "acceptable_domains": [
+    "frontend-engineering"
+   ],
+   "engineered": "You are a senior React developer specializing in building robust, reusable UI components with clean state management.\n\nBuild a React component that renders a paginated list of users. The component must accept a `users` array as a prop and display a subset of users based on the current page, along with navigation controls to move between pages.\n\nCRITICAL CONSTRAINT: The component MUST handle invalid, non-array, or empty user data inputs gracefully without throwing errors or crashing the application.\n\nRequirements:\n1.  **Props**: Accept `users` (array of user objects) and optional `itemsPerPage` (number, default 10).\n2.  **State**: Manage `currentPage` (integer, default 1) internally.\n3.  **Logic**: Calculate the start and end indices for slicing the `users` array based on `currentPage` and `itemsPerPage`.\n4.  **UI**: Render the sliced list of users. Include \"Previous\" and \"Next\" buttons. Disable \"Previous\" on the first page and \"Next\" on the last page. Display current page info (e.g., \"Page 1 of 5\").\n5.  **Styling**: Use minimal inline styles or standard CSS classes for portability; do not rely on external UI libraries like Material UI or Tailwind.\n\nEdge Cases to Handle:\n1.  **Invalid Input**: If `users` is not an array, is null, or is undefined, render a friendly error message or empty state instead of crashing.\n2.  **Empty List**: If the `users` array is empty, display a \"No users found\" message and disable navigation buttons.\n3.  **Small List**: If the total number of users is less than `itemsPerPage`, only show one page and disable the \"Next\" button.\n4.  **Boundary Navigation**: Ensure clicking \"Previous\" on page 1 does nothing, and clicking \"Next\" on the last page does nothing.\n\nOutput Format:\nProvide the complete, functional React component code in a single file. Include necessary imports (e.g., `useState`, `useMemo`). Do not include API fetching logic; assume data is passed via props.\n\nCRITICAL CONSTRAINT: The component MUST handle invalid, non-array, or empty user data inputs gracefully without throwing errors or crashing the application."
+  },
+  {
+   "id": "pn-03",
+   "category": "proper-noun",
+   "task": "write a Dockerfile and a Kubernetes deployment manifest for the service",
+   "acceptable_domains": [
+    "devops-cloud"
+   ],
+   "engineered": "You are a DevOps engineer specializing in containerization and Kubernetes orchestration. Create a Dockerfile and a Kubernetes deployment manifest for a generic web service, ensuring the Dockerfile uses a standard base image, copies application code, and sets an entrypoint, while the Kubernetes manifest includes apiVersion, kind: Deployment, spec.template, container definition, resource requests/limits, and health checks. You must handle missing application source code by using generic placeholders, default to port 8080 if undefined, use a placeholder registry, assume a Node.js/Python web service structure, use the default namespace, set 1 replica, and tag the image as latest. Handle edge cases where application source code is missing by using generic placeholders, where port numbers are undefined by defaulting to 8080, and where the image registry is undefined by using a placeholder registry. Output ONLY the Dockerfile content followed by the Kubernetes deployment manifest YAML, with no additional text, explanations, or markdown fences. You must handle missing application source code by using generic placeholders, default to port 8080 if undefined, use a placeholder registry, assume a Node.js/Python web service structure, use the default namespace, set 1 replica, and tag the image as latest."
+  },
+  {
+   "id": "pn-04",
+   "category": "proper-noun",
+   "task": "write a Solidity contract that holds escrow payments until both parties confirm",
+   "acceptable_domains": [
+    "solidity-engineering",
+    "defi-blockchain"
+   ],
+   "engineered": "You are an expert Solidity smart contract developer specializing in secure financial primitives and access control.\n\nCRITICAL CONSTRAINT: The contract MUST strictly enforce that funds are only released when BOTH parties have explicitly confirmed; no partial releases or unilateral withdrawals are permitted under any circumstances.\n\nDevelop a Solidity smart contract implementing a two-party escrow mechanism. The contract must accept a deposit from an initiator, hold the funds securely, and require explicit confirmation from both the initiator and a designated counterparty before releasing the funds. Upon mutual confirmation, the funds must be transferred back to the original depositor. You must implement state variables to track the confirmation status of each party individually. Implement strict access control so that only the respective party can call the function to confirm their side. Emit events for all state-changing actions, including deposits, confirmations, and fund releases, to ensure transparency.\n\nAdhere to the following specific constraints:\n1. Use Solidity version 0.8.0 or higher.\n2. Include checks-effects-interactions patterns to prevent reentrancy attacks.\n3. Validate that the deposit amount is greater than zero.\n4. Ensure that a party cannot confirm more than once.\n5. Prevent any withdrawal attempts until both confirmation flags are true.\n\nHandle the following edge cases explicitly:\n1. Reject transactions where the deposit value is zero.\n2. Revert if a party attempts to confirm after they have already confirmed.\n3. Revert if a withdrawal is attempted before both parties have confirmed.\n4. Ensure funds remain locked if only one party has confirmed.\n\nOutput the complete, compilable Solidity code for the contract. Include necessary comments explaining the state variables and the logic flow. Do not include any external library imports unless they are standard OpenZeppelin contracts for security primitives if deemed necessary, but prefer native Solidity implementations for simplicity unless specific security features require otherwise.\n\nCRITICAL CONSTRAINT: The contract MUST strictly enforce that funds are only released when BOTH parties have explicitly confirmed; no partial releases or unilateral withdrawals are permitted under any circumstances."
+  },
+  {
+   "id": "pn-05",
+   "category": "proper-noun",
+   "task": "build a Flutter screen with a bottom navigation bar and three tabs",
+   "acceptable_domains": [
+    "dart-flutter-engineering",
+    "mobile-engineering"
+   ],
+   "engineered": "You are a senior Flutter developer specializing in Material Design and state management.\n\nCreate a complete, runnable Flutter screen widget that implements a `BottomNavigationBar` with three distinct tabs, ensuring the `currentIndex` state is explicitly managed and updated on user interaction.\n\n**Explicit Requirements:**\n*   Use `Scaffold` as the root widget.\n*   Implement `StatefulWidget` to manage the `currentIndex` of the selected tab.\n*   Define three tabs with distinct icons and labels (e.g., Home, Search, Profile).\n*   Use `IndexedStack` for the body content to preserve the state of each tab when switching, rather than rebuilding widgets.\n*   Provide simple placeholder content (e.g., `Center` with `Text`) for each of the three tabs.\n*   Use standard Material Design defaults for styling to keep the code concise.\n\n**Edge Cases to Handle:**\n*   Ensure rapid tapping on navigation items does not cause visual glitches or state inconsistencies (rely on Flutter's built-in state handling for `BottomNavigationBar`).\n*   Ensure the layout remains stable and responsive during screen resizing or orientation changes.\n*   Include a basic fallback or empty state structure in the tab content widgets to handle potential rendering issues gracefully.\n\n**Output Format:**\nProvide ONLY the complete Dart code for the widget class. Do not include explanations, markdown fences, or additional text.\n\nCreate a complete, runnable Flutter screen widget that implements a `BottomNavigationBar` with three distinct tabs, ensuring the `currentIndex` state is explicitly managed and updated on user interaction."
+  },
+  {
+   "id": "pn-06",
+   "category": "proper-noun",
+   "task": "write a Terraform module for an S3 bucket with versioning enabled",
+   "acceptable_domains": [
+    "devops-cloud"
+   ],
+   "engineered": "You are a senior Terraform module developer specializing in AWS infrastructure-as-code best practices. Create a self-contained, reusable Terraform module for an AWS S3 bucket with versioning enabled, strictly using the modern `aws_s3_bucket_versioning` resource (AWS Provider v4+ syntax) instead of the deprecated `versioning` block. The module must include: 1) A `variables.tf` file defining inputs for `bucket_name` (required, unique), `tags` (optional map with sensible defaults), and any other necessary configuration; 2) A `main.tf` file containing the `aws_s3_bucket` resource and the separate `aws_s3_bucket_versioning` resource to enable versioning; 3) An `outputs.tf` file exposing the bucket ID, ARN, and name for downstream usage. Handle edge cases by ensuring the module fails gracefully or provides clear errors if the bucket name is not unique, and ensure optional tags are handled correctly even if null or empty. Do not include encryption or other features not explicitly requested to avoid scope creep. The final output must be the complete, valid Terraform code for these three files, clearly labeled. Strictly use the modern `aws_s3_bucket_versioning` resource (AWS Provider v4+ syntax) instead of the deprecated `versioning` block."
+  },
+  {
+   "id": "pn-07",
+   "category": "proper-noun",
+   "task": "create a Figma plugin that exports the design tokens to CSS variables",
+   "acceptable_domains": [
+    "figma-automation",
+    "ui-ux-design"
+   ],
+   "engineered": "You are an expert Figma Plugin Developer specializing in the Figma Plugin API and CSS generation.\n\nCreate a complete, functional Figma plugin that extracts design tokens (Local Variables and Styles) from the current Figma file and exports them as CSS variables. The plugin must include a UI with an \"Export\" button and a \"Copy to Clipboard\" button, display status messages, and handle the conversion of Figma properties (colors, typography, effects) into valid CSS syntax within a `:root` block using kebab-case naming conventions.\n\nAdhere strictly to these constraints:\n1.  **Scope:** Only export \"Local Variables\" and \"Styles\" (colors, text, effects). Ignore raw layer properties.\n2.  **Output Format:** Generate a `:root` CSS block with `--token-name: value;` syntax.\n3.  **Naming:** Convert all token names to kebab-case to ensure CSS compatibility.\n4.  **UI:** Provide a simple HTML/CSS interface for the plugin panel with clear feedback (success/error messages).\n5.  **Functionality:** Include a \"Copy to Clipboard\" button that copies the generated CSS string.\n6.  **Error Handling:** Gracefully handle files with no styles/variables, empty/null values, and unsupported token types by logging errors or skipping invalid entries without crashing.\n\nHandle the following edge cases explicitly:\n*   Files containing no defined styles or variables (show a \"No tokens found\" message).\n*   Tokens with unsupported types (e.g., complex effects that cannot be easily mapped to simple CSS vars) should be skipped or logged.\n*   Duplicate token names must be resolved by appending a unique identifier or index to ensure unique CSS variable names.\n*   Empty or null values in token definitions should be ignored.\n\nProvide the complete code for `manifest.json`, `code.ts` (the plugin logic), and `ui.html` (the interface). Ensure the code is production-ready, well-commented, and follows TypeScript best practices.\n\nThe single most critical constraint is that the plugin MUST ONLY export Local Variables and Styles, ignoring raw layer properties, and output them as valid CSS variables in a `:root` block."
+  },
+  {
+   "id": "pn-08",
+   "category": "proper-noun",
+   "task": "compile a Rust crate to WebAssembly and call it from the browser",
+   "acceptable_domains": [
+    "webassembly-systems-engineering",
+    "systems-programming"
+   ],
+   "engineered": "You are an expert Rust and WebAssembly developer specializing in browser integration.\n\nCompile a Rust crate to WebAssembly and invoke it from a browser environment using `wasm-pack` and `wasm-bindgen`.\n\nCRITICAL CONSTRAINT: You MUST use `wasm-pack` as the build tool and `wasm-bindgen` for JavaScript interoperability; do not use raw `wasm-bindgen-cli` or manual JS glue code.\n\nRequirements:\n1.  **Rust Setup**: Initialize a new Rust library project. Add `wasm-bindgen` as a dependency.\n2.  **Rust Code**: Write a simple function (e.g., `greet` or `add`) annotated with `#[wasm_bindgen]` to export it to JavaScript. Ensure the function signature is compatible with JS types (e.g., `&str` or `u32`).\n3.  **Build Process**: Provide the exact command to install the `wasm32-unknown-unknown` target and the command to build the project using `wasm-pack build --target web`.\n4.  **HTML/JS Entry Point**: Provide a complete `index.html` file that:\n    *   Imports the generated JavaScript glue code.\n    *   Uses an async function to initialize the Wasm module.\n    *   Calls the exported Rust function and displays the result in the DOM.\n5.  **Server Requirement**: Explicitly instruct the user to serve the files via a local HTTP server (e.g., `python -m http.server` or `npx serve`) because loading Wasm via `file://` protocol is blocked by browser security policies (CORS).\n\nEdge Cases to Handle:\n*   **CORS/Local Server**: Explain why opening `index.html` directly fails and how to run a local server.\n*   **Toolchain Target**: Include the step to add the `wasm32-unknown-unknown` target if missing.\n*   **Async Initialization**: Ensure the JavaScript code correctly awaits the Wasm initialization before calling functions.\n\nOutput Format:\n1.  Step-by-step terminal commands for setup and building.\n2.  The full content of `Cargo.toml`.\n3.  The full content of `src/lib.rs`.\n4.  The full content of `index.html`.\n5.  Instructions on how to run the local server and view the result.\n\nCRITICAL CONSTRAINT: You MUST use `wasm-pack` as the build tool and `wasm-bindgen` for JavaScript interoperability; do not use raw `wasm-bindgen-cli` or manual JS glue code."
+  },
+  {
+   "id": "pn-09",
+   "category": "proper-noun",
+   "task": "write a PySpark job that aggregates the daily event stream",
+   "acceptable_domains": [
+    "data-science",
+    "distributed-systems-database-engineering"
+   ],
+   "engineered": "You are an expert PySpark engineer specializing in large-scale data processing and robust ETL pipeline design.\n\nCRITICAL CONSTRAINT: You must implement the solution using PySpark (Spark 3.x syntax) with UTC timezone handling for all date operations.\n\nYour task is to write a complete PySpark job that aggregates a daily event stream. The job should read event data from a CSV file, clean and standardize the data, and then aggregate the events by counting the number of occurrences per `event_type` for each day. You must define a clear schema for the input data (including `timestamp`, `event_type`, and `user_id`) and ensure that timestamps are parsed and converted to UTC to handle timezone discrepancies. The aggregation logic should group data by the date (derived from the timestamp) and `event_type`, then count the events.\n\nExplicit constraints and requirements:\n1.  **Framework**: Use PySpark with Spark 3.x compatible syntax.\n2.  **Input**: Read from a CSV file. Assume the input columns are `timestamp` (string), `event_type` (string), and `user_id` (string).\n3.  **Schema Definition**: Explicitly define the schema for the input DataFrame.\n4.  **Timestamp Handling**: Parse the `timestamp` column into a standard timestamp type. Convert all timestamps to UTC. Derive a `date` column from the timestamp for daily bucketing.\n5.  **Data Cleaning**: Handle null or malformed records gracefully. Rows with invalid or missing timestamps should be filtered out or handled without causing job failure.\n6.  **Aggregation**: Count the number of events for each unique combination of `date` and `event_type`.\n7.  **Performance**: Implement basic optimization strategies such as appropriate partitioning (e.g., repartitioning by date) and caching if necessary for intermediate steps.\n8.  **Output**: Save the final aggregated results to a Parquet file.\n\nEdge cases to handle:\n1.  **Invalid Timestamps**: Rows with missing, null, or unparseable timestamp values must be excluded from the aggregation.\n2.  **Duplicate Events**: The aggregation should correctly count all events, including duplicates, as distinct occurrences unless deduplication is explicitly required by the business logic (assume simple count for this task).\n3.  **Timezone Discrepancies**: Ensure that day boundaries are consistent by converting all timestamps to UTC before extracting the date.\n4.  **Empty Input**: The job should handle empty input datasets gracefully without throwing errors.\n\nExpected output format:\nProvide the complete Python code for the PySpark job. The code should include:\n1.  Initialization of the SparkSession.\n2.  Schema definition.\n3.  Data loading and cleaning logic.\n4.  Aggregation logic.\n5.  Output writing logic.\n6.  Comments explaining key steps,"
+  },
+  {
+   "id": "pn-10",
+   "category": "proper-noun",
+   "task": "add a Prometheus metric and a Grafana dashboard panel for request latency",
+   "acceptable_domains": [
+    "sre-production-operations",
+    "devops-cloud"
+   ],
+   "engineered": "Act as a Senior Backend Engineer specializing in observability and monitoring systems.\n\nImplement a Prometheus Histogram metric for request latency and provide the corresponding Grafana dashboard panel configuration to visualize it.\n\nCRITICAL CONSTRAINT: You MUST use a Histogram metric type (not Summary) to ensure efficient aggregation across multiple instances, and you MUST use `histogram_quantile` in the Grafana query to calculate p95/p99 latency.\n\nRequirements:\n1.  **Metric Definition**: Define a Prometheus Histogram metric named `http_request_duration_seconds`.\n2.  **Labels**: Include labels for `method` (HTTP method) and `status` (HTTP status code) to enable filtering.\n3.  **Registration**: Ensure the metric is properly registered and exposed on the standard Prometheus endpoint.\n4.  **Grafana Panel**: Provide the JSON configuration or PromQL query for a Grafana panel.\n    *   **Visualization**: Use a Time Series graph format.\n    *   **Query**: Use `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, method, status))` to calculate the 95th percentile latency.\n5.  **Language**: Select a common HTTP server library (e.g., Go `prometheus/client_golang` or Python `prometheus_client`) and implement the middleware/interceptor logic to record the latency.\n\nEdge Cases to Handle:\n1.  **Malformed Headers**: Ensure the metric collection does not crash if request headers are missing or malformed; default to safe values (e.g., \"UNKNOWN\" for method/status) if necessary.\n2.  **High Cardinality**: Avoid adding high-cardinality labels (like user IDs or specific URLs) to prevent metric explosion. Stick strictly to `method` and `status`.\n3.  **Empty Data**: Ensure the Grafana query handles scenarios where no requests are made (empty data range) gracefully without errors.\n\nOutput Format:\n1.  Code snippet for the metric definition and registration.\n2.  Code snippet for the middleware/interceptor that records the latency.\n3.  The PromQL query for the Grafana panel.\n4.  Brief instructions on how to add the panel in Grafana.\n\nCRITICAL CONSTRAINT: You MUST use a Histogram metric type (not Summary) to ensure efficient aggregation across multiple instances, and you MUST use `histogram_quantile` in the Grafana query to calculate p95/p99 latency."
+  },
+  {
+   "id": "pe-01",
+   "category": "plain-english",
+   "task": "add an endpoint that creates an order and returns its identifier",
+   "acceptable_domains": [
+    "backend-engineering"
+   ],
+   "note": "pn-01 with the proper noun removed. The reference implementation answers figma-automation-engineer here.",
+   "engineered": "Act as a senior backend engineer specializing in RESTful API design.\n\nImplement a new POST endpoint that creates an order and returns its unique identifier.\n\nYou must strictly adhere to the following constraints:\n1. Use the HTTP POST method for the endpoint.\n2. Accept order details (items, customer info) via the request body.\n3. Validate all input data before processing; reject invalid or malformed requests with a 400 Bad Request status.\n4. Persist the order data to a database or storage backend.\n5. Generate the order ID server-side (e.g., UUID or auto-increment).\n6. Return a 201 Created status code with a JSON response containing the new order's identifier upon success.\n7. Handle database connection failures or transaction errors gracefully, returning appropriate error codes (e.g., 500 Internal Server Error).\n8. Address potential duplicate order creation attempts if idempotency is relevant.\n\nEnsure the implementation handles these edge cases:\n- Missing or malformed JSON in the request body.\n- Invalid data types or missing required fields in the input.\n- Database connectivity issues or transaction rollbacks.\n- Idempotency conflicts for duplicate creation requests.\n\nOutput the complete code for the endpoint, including route definition, controller logic, validation, and error handling.\n\nCRITICAL: The endpoint MUST return the newly created order's identifier in the response payload."
+  },
+  {
+   "id": "pe-02",
+   "category": "plain-english",
+   "task": "the list page is slow because every row triggers its own query",
+   "acceptable_domains": [
+    "backend-engineering",
+    "distributed-systems-database-engineering",
+    "architecture-quality"
+   ],
+   "engineered": "You are a senior backend performance engineer specializing in database optimization and ORM patterns.\n\nCRITICAL CONSTRAINT: You MUST eliminate the N+1 query problem by replacing individual per-row queries with a single optimized data fetch strategy (eager loading or batching).\n\nResolve the performance bottleneck on a list page where each row currently triggers its own database query. Implement a solution using generic ORM patterns (applicable to Hibernate, SQLAlchemy, Django ORM, etc.) that fetches all necessary related data in a single operation or a minimal number of batched operations. Ensure the solution maintains data consistency with the original row-by-row results and scales efficiently with increasing list sizes.\n\nAdhere to these specific requirements:\n1. Use eager loading (JOINs) or query batching as the primary optimization strategy.\n2. Ensure the solution is conceptually applicable to most standard ORMs without relying on framework-specific magic unless clearly commented.\n3. Maintain exact data accuracy between the optimized fetch and the original unoptimized results.\n\nHandle the following edge cases explicitly:\n1. Empty lists or single-item lists must render correctly without triggering unnecessary batch logic or errors.\n2. Pagination boundaries must align correctly with the optimized fetch scope to prevent data leakage or missing items.\n3. Rows with missing or null foreign keys must be handled gracefully to prevent join failures or null pointer exceptions in the eager loading process.\n\nProvide the final code implementation and a brief explanation of the chosen strategy.\n\nCRITICAL CONSTRAINT: You MUST eliminate the N+1 query problem by replacing individual per-row queries with a single optimized data fetch strategy (eager loading or batching)."
+  },
+  {
+   "id": "pe-03",
+   "category": "plain-english",
+   "task": "make the login form show a validation message underneath each field",
+   "acceptable_domains": [
+    "frontend-engineering",
+    "ui-ux-design"
+   ],
+   "engineered": "You are a senior frontend developer specializing in accessible, robust React forms.\n\nDisplay validation messages directly beneath each input field in the login form.\n\nImplement a React-based login form that displays validation messages directly beneath each input field. The solution must use React with HTML5 and CSS, implementing basic client-side validation for email format and non-empty password fields. Validation messages must appear only when validation fails or the field has been touched/blurred, and must disappear immediately when the input becomes valid. Use simple CSS classes to style error states with visual distinction (e.g., red text) and ensure accessibility by associating messages with inputs via `aria-describedby`. Handle edge cases including: no messages on initial load for empty fields, smooth updates during rapid typing without flicker, distinction between client-side format checks and potential server-side errors, and proper focus management to keep focus on invalid fields. Display validation messages directly beneath each input field in the login form.\n\nProvide the complete React component code, including the necessary CSS styles for error states, and ensure the implementation is self-contained and ready to run."
+  },
+  {
+   "id": "pe-04",
+   "category": "plain-english",
+   "task": "write unit tests for the order repository including its failure cases",
+   "acceptable_domains": [
+    "quality-testing"
+   ],
+   "engineered": "Act as a Senior Java Developer specializing in Spring Boot and Test-Driven Development.\n\nWrite comprehensive unit tests for the `OrderRepository` class using JUnit 5 and Mockito, ensuring that the most critical requirement is strictly followed: you must include specific test cases for failure scenarios and edge cases.\n\nAdhere to the following constraints and requirements:\n1.  **Framework**: Use JUnit 5 (`@Test`, `@BeforeEach`, etc.) and Mockito (`@Mock`, `@InjectMocks`, `when()`, `verify()`).\n2.  **Isolation**: Mock all external dependencies (e.g., `EntityManager`, `JdbcTemplate`, or underlying data sources) to ensure these are pure unit tests, not integration tests.\n3.  **Coverage**: Include both positive (success) cases to verify baseline functionality and negative (failure) cases to verify error handling.\n4.  **Error Verification**: Explicitly verify that appropriate exceptions (e.g., `NotFoundException`, `DataAccessException`, `IllegalArgumentException`) are thrown or error codes are returned during failure scenarios.\n5.  **Code Quality**: Follow standard naming conventions for test methods (e.g., `shouldThrowExceptionWhenOrderIdIsNull`) and include clear assertions.\n\nYou must handle the following specific edge cases in your test suite:\n1.  **Null/Invalid Input**: Verify behavior when `null` or invalid `Order` objects or IDs are passed.\n2.  **Non-existent Entity**: Verify behavior when looking up an `Order` ID that does not exist in the mocked data store.\n3.  **Database Unavailability**: Simulate database connection timeouts or unavailability and verify the repository handles it gracefully (e.g., by throwing a specific exception).\n4.  **Duplicate Key Violations**: Simulate a unique constraint violation during `save` or `create` operations.\n5.  **Concurrent Modification**: Simulate optimistic locking failures or concurrent modification conflicts if applicable to the repository pattern.\n\nOutput ONLY the complete Java test class code. Do not include explanations, markdown fences, or preamble. Ensure the most critical requirement is strictly followed: you must include specific test cases for failure scenarios and edge cases."
+  },
+  {
+   "id": "pe-05",
+   "category": "plain-english",
+   "task": "the service runs out of memory after a few hours under load, find the leak",
+   "acceptable_domains": [
+    "sre-production-operations",
+    "systems-programming",
+    "architecture-quality"
+   ],
+   "engineered": "You are a senior performance engineer specializing in memory diagnostics and runtime optimization.\n\nIdentify the root cause of memory exhaustion occurring after hours of operation under load.\n\nCRITICAL CONSTRAINT: You must provide actionable, step-by-step profiling instructions (e.g., heap dumps, GC logs) rather than theoretical advice.\n\nYour response must include:\n1.  A language-agnostic methodology for diagnosing memory leaks, with specific examples for Java and Node.js.\n2.  Instructions on how to correlate memory growth with specific application events or requests.\n3.  Recommendations for tools appropriate for remote debugging in production-like environments.\n4.  Strategies to handle edge cases, including:\n    *   Memory leaks in native libraries or external dependencies not visible in standard language profilers.\n    *   Thread-local storage accumulation or unclosed resources (DB connections, file handles) causing indirect memory pressure.\n    *   Distinguishing between actual leaks and GC thrashing or configuration issues.\n\nEnsure the guidance is concrete, specific, and ready for immediate execution in a production environment.\n\nCRITICAL CONSTRAINT: You must provide actionable, step-by-step profiling instructions (e.g., heap dumps, GC logs) rather than theoretical advice."
+  },
+  {
+   "id": "pe-06",
+   "category": "plain-english",
+   "task": "add retries with exponential backoff to the outbound HTTP calls",
+   "acceptable_domains": [
+    "backend-engineering",
+    "sre-production-operations"
+   ],
+   "engineered": "You are a senior backend engineer specializing in resilient distributed systems and robust network programming.\n\nImplement retry logic with exponential backoff for outbound HTTP calls.\n\nCRITICAL CONSTRAINT: You MUST distinguish between retryable errors (5xx server errors, connection timeouts) and non-retryable errors (4xx client errors), ensuring that 4xx errors are NOT retried.\n\nRequirements:\n1. Implement a retry mechanism for outbound HTTP requests using an exponential backoff strategy.\n2. Set the maximum number of attempts to 3 (1 initial attempt + 2 retries).\n3. Use a base delay of 1 second, doubling the delay for each subsequent retry.\n4. Apply full jitter to the delay calculation (random delay between 0 and the calculated max delay) to prevent thundering herd problems.\n5. Log each retry attempt for observability purposes.\n6. Ensure the implementation handles immediate success on the first attempt without unnecessary delays.\n\nEdge Cases to Handle:\n1. Immediate success on the first attempt (no retries needed).\n2. All retries fail (must return the final error after max attempts).\n3. Mixed success/failure scenarios (e.g., failure then success).\n4. Distinction between network timeouts (retryable) and server errors (retryable) versus client errors (non-retryable).\n\nExpected Output:\nProvide the complete code implementation including the retry logic, helper functions for delay calculation and jitter, and example usage or integration points. Include comments explaining the retry strategy and error handling logic.\n\nCRITICAL CONSTRAINT: You MUST distinguish between retryable errors (5xx server errors, connection timeouts) and non-retryable errors (4xx client errors), ensuring that 4xx errors are NOT retried."
+  },
+  {
+   "id": "pe-07",
+   "category": "plain-english",
+   "task": "encrypt the stored customer identifiers so they are unreadable at rest",
+   "acceptable_domains": [
+    "cybersecurity",
+    "security-governance"
+   ],
+   "engineered": "You are a senior security engineer specializing in data-at-rest encryption and secure key management.\n\nCRITICAL CONSTRAINT: You MUST implement AES-256-GCM authenticated encryption with secure key management via HSM or Cloud KMS; do not use symmetric keys stored in plain text or weak algorithms.\n\nYour task is to design and implement a secure encryption solution for customer identifiers stored in a database, ensuring they are unreadable at rest while maintaining authorized decryption capabilities. You must provide code that handles the encryption and decryption processes, integrates with a key management system, and ensures data integrity.\n\nExplicit requirements and constraints:\n1. Algorithm: Use AES-256-GCM for authenticated encryption to ensure both confidentiality and integrity.\n2. Key Management: Integrate with a Hardware Security Module (HSM) or Cloud Key Management Service (KMS) for key storage, rotation, and access control. Do not hardcode keys.\n3. Scope: The solution must apply to the database storage layer.\n4. Decryption: Ensure authorized users/systems can decrypt identifiers when necessary.\n5. Security: Implement strict access controls and audit logging for key usage.\n\nEdge cases to handle:\n1. Null or empty identifier fields: Handle gracefully without throwing errors.\n2. Size limits: Handle identifiers that may exceed standard block/cipher size limits using appropriate padding or chunking strategies.\n3. Concurrency: Ensure thread-safety and handle concurrent read/write operations during encryption/decryption to prevent race conditions.\n4. Key compromise/loss: Include mechanisms for key rotation and recovery procedures in your design documentation or code comments.\n\nExpected output format:\n1. Provide the core encryption/decryption class or module code.\n2. Include a configuration example for connecting to the KMS/HSM.\n3. Provide unit tests demonstrating the handling of the specified edge cases.\n4. Include a brief explanation of the security model and key rotation strategy.\n\nCRITICAL CONSTRAINT: You MUST implement AES-256-GCM authenticated encryption with secure key management via HSM or Cloud KMS; do not use symmetric keys stored in plain text or weak algorithms."
+  },
+  {
+   "id": "pe-08",
+   "category": "plain-english",
+   "task": "batch the outgoing notifications so each user gets at most one per hour",
+   "acceptable_domains": [
+    "backend-engineering"
+   ],
+   "engineered": "You are a senior backend engineer specializing in high-concurrency distributed systems and rate-limiting algorithms.\n\nYour task is to implement a notification batching service that ensures each user receives at most one notification per hour. The system must manage incoming notification requests, enforce the frequency constraint, and handle the underlying state and concurrency requirements robustly.\n\nCRITICAL CONSTRAINT: You must strictly enforce a maximum frequency of one notification per user per hour using a rolling 60-minute window; any violation of this rate limit must result in the immediate dropping of the subsequent notification.\n\nSpecific Implementation Requirements:\n1.  **State Management**: Use an in-memory cache (simulated or using a library like Redis) to track the timestamp of the last successfully sent notification for each user.\n2.  **Window Logic**: Implement a rolling window mechanism. A notification is allowed only if the current time is more than 60 minutes after the last sent notification for that user. Do not use fixed hourly buckets (e.g., 1:00-1:59); use a relative 60-minute cooldown from the last event.\n3.  **Concurrency Control**: Ensure thread-safety for all state updates. Use appropriate locking mechanisms (e.g., mutexes, atomic operations, or distributed locks) to prevent race conditions when multiple requests for the same user arrive simultaneously.\n4.  **Conflict Resolution**: If a notification arrives for a user who has already received one within the last 60 minutes, drop the new notification immediately. Do not queue, merge, or delay it.\n5.  **Persistence Strategy**: Assume the system may restart. Design the state storage interface to allow for easy integration with persistent storage (e.g., saving the last timestamp to a database or Redis with TTL) to survive crashes, though the primary implementation should focus on the in-memory logic with clear hooks for persistence.\n\nEdge Cases to Handle:\n1.  **High-Volume Bursts**: Efficiently handle scenarios where thousands of notifications for the same user arrive in a short period without degrading performance or causing deadlocks.\n2.  **Clock Skew**: Account for potential minor clock discrepancies by using a monotonic clock or server-side time source rather than client-provided timestamps.\n3.  **State Initialization**: Handle cases where no previous state exists for a user (first-time notification should always be allowed).\n4.  **Time Zone Independence**: Ensure the 60-minute calculation is based on absolute time differences, independent of time zones or daylight saving time changes.\n\nExpected Output Format:\nProvide the complete source code for the notification service, including:\n1.  The core class/module implementing the batching logic.\n2.  Helper functions for state management and time calculation.\n3.  Unit tests demonstrating:\n    *   Successful notification delivery.\n    *   Dropping of notifications within the cooldown window.\n    *   Correct handling of concurrent requests"
+  },
+  {
+   "id": "pe-09",
+   "category": "plain-english",
+   "task": "make every page usable with only a keyboard and a screen reader",
+   "acceptable_domains": [
+    "ui-ux-design",
+    "frontend-engineering"
+   ],
+   "engineered": "You are an expert Web Accessibility Engineer specializing in WCAG 2.1 AA compliance. Your task is to implement a global accessibility strategy that makes every page fully usable with only a keyboard and a screen reader. You must ensure full keyboard navigability and full screen reader compatibility across all pages by implementing logical tab orders, visible focus indicators, semantic HTML5 structure, and appropriate ARIA labels/roles where native semantics are insufficient. All interactive elements must be focusable and operable via Enter or Space, and you must maintain sufficient color contrast and provide text alternatives for images. You must handle complex widgets (dropdowns, modals, carousels) with custom keyboard traps or navigation, announce dynamic content updates via live regions, provide clear screen reader feedback for form validation errors, and include skip navigation links to bypass repetitive menus. Assume WCAG 2.1 AA compliance as the baseline and apply a framework-agnostic semantic HTML/ARIA approach for universal applicability. Output ONLY the final prompt text itself, nothing else -- no preamble, no markdown fences, no meta-commentary about what you did."
+  },
+  {
+   "id": "pe-10",
+   "category": "plain-english",
+   "task": "translate the whole interface into Hindi and Tamil including plural forms",
+   "acceptable_domains": [
+    "i18n-l10n-engineering",
+    "india-dpi-indic-language-engineering"
+   ],
+   "engineered": "You are an expert localization engineer specializing in Indian languages, specifically Hindi and Tamil.\n\nTranslate the entire user interface into Hindi and Tamil, ensuring that all plural forms are correctly implemented according to the grammatical rules of each language.\n\nAdhere strictly to the following constraints:\n1.  **Scope**: Translate all visible UI text strings. Do not translate backend logs, developer comments, variable names, or proper nouns.\n2.  **Pluralization**: Implement correct plural forms for both languages.\n    *   **Hindi**: Use appropriate suffixes (e.g., -en/-e) and handle gender-specific grammar where applicable.\n    *   **Tamil**: Use the standard plural suffix (-gaḷ) and handle irregular forms if contextually required.\n3.  **Placeholders**: Preserve all dynamic variable placeholders (e.g., `{count}`, `{name}`) exactly as they appear in the source code.\n4.  **Encoding**: Ensure the output supports Devanagari (Hindi) and Tamil scripts correctly.\n5.  **Layout**: Maintain the original UI structure and code logic; do not alter functionality.\n6.  **Register**: Use a standard, formal register suitable for general software interfaces.\n\nHandle the following edge cases explicitly:\n*   **Zero Values**: Provide specific grammatical forms for zero counts (e.g., \"0 items\").\n*   **Singular/Plural Transitions**: Distinguish clearly between singular (1 item) and plural (2+ items) forms.\n*   **Mixed Content**: Leave proper nouns and mixed-language content untranslated.\n*   **Text Expansion**: Be aware that non-Latin scripts may expand in length; ensure translations are concise enough to fit standard UI constraints where possible, though layout changes are not your responsibility.\n\nOutput the translated code or string resources in the same format as the input.\n\nTranslate the entire user interface into Hindi and Tamil, ensuring that all plural forms are correctly implemented according to the grammatical rules of each language."
+  },
+  {
+   "id": "pe-11",
+   "category": "plain-english",
+   "task": "the build takes twenty minutes, work out what to cache and make it faster",
+   "acceptable_domains": [
+    "devops-cloud",
+    "code-quality-static-analysis",
+    "sre-production-operations"
+   ],
+   "engineered": "You are a Senior DevOps Engineer specializing in CI/CD pipeline optimization and build acceleration. Your task is to design a comprehensive caching strategy to reduce a 20-minute build time by identifying cacheable artifacts and implementing robust caching mechanisms. You must explicitly identify which artifacts (e.g., dependency downloads, compiled objects, test fixtures) should be cached and provide concrete implementation examples for a generic CI/CD environment (like GitHub Actions or GitLab CI) using remote distributed storage. You must handle edge cases including cold starts, cache invalidation on dependency changes, storage quota limits, and concurrent build conflicts, while ensuring build reproducibility and providing metrics to verify the speedup. CRITICAL CONSTRAINT: You must ensure strict cache integrity with automatic invalidation on any code or dependency changes to prevent stale builds."
+  },
+  {
+   "id": "pe-12",
+   "category": "plain-english",
+   "task": "detect when two people edit the same record at once and refuse the stale write",
+   "acceptable_domains": [
+    "distributed-systems-database-engineering",
+    "backend-engineering"
+   ],
+   "engineered": "You are a senior backend engineer specializing in database concurrency control and data integrity.\n\nImplement an Optimistic Concurrency Control (OCC) mechanism using a version counter to detect and reject stale writes when two users attempt to edit the same record simultaneously.\n\nCRITICAL CONSTRAINT: You MUST use a version column (integer) for concurrency control, NOT timestamps.\n\nCore Task:\nDesign and implement a database update operation that checks the current version of a record against the version provided by the client. If the versions match, update the record and increment the version. If they do not match, reject the update.\n\nExplicit Requirements:\n1. Use a version integer column in the database schema.\n2. Implement the check-and-update logic atomically (e.g., using a single SQL UPDATE statement with a WHERE clause checking the version, or a database transaction with appropriate isolation levels).\n3. Throw a specific `ConcurrencyException` if the update affects zero rows (indicating the version has changed since it was read).\n4. Ensure the solution is applicable to a standard relational database context.\n\nEdge Cases to Handle:\n1. Initial record creation: Ensure the version is initialized correctly (e.g., to 0 or 1) when a new record is inserted.\n2. Rapid successive edits: Ensure the logic holds up under high-frequency updates from the same or different users.\n3. Network latency: The solution must rely on the database state at the time of the write, not client-side timing, to avoid false positives due to latency.\n\nExpected Output Format:\nProvide the database schema definition (SQL) for the table including the version column, and the code implementation (pseudo-code or specific language like Java/Python/Node.js) for the update function that enforces the OCC logic.\n\nCRITICAL CONSTRAINT: You MUST use a version column (integer) for concurrency control, NOT timestamps."
+  },
+  {
+   "id": "pe-13",
+   "category": "plain-english",
+   "task": "draw the class and sequence diagrams for the checkout flow",
+   "acceptable_domains": [
+    "uml-diagram-engineering",
+    "architecture-quality"
+   ],
+   "engineered": "You are an expert UML modeler specializing in e-commerce system architecture.\n\nGenerate PlantUML code for both a Class Diagram and a Sequence Diagram representing a standard e-commerce checkout flow.\n\nThe output must strictly use PlantUML syntax. The Class Diagram must define core entities (Cart, Order, Payment, User) with relevant attributes and methods, illustrating their relationships. The Sequence Diagram must depict the chronological object interactions from adding items to cart, through validation (inventory and auth), payment processing, to order confirmation. Use standard UML notation for clarity.\n\nHandle the following edge cases within the Sequence Diagram logic: payment failure or timeout scenarios, out-of-stock items detected during the checkout process, and invalid user authentication or session expiration. Limit the scope to a synchronous flow (Cart -> Payment -> Order) and exclude complex logistics or shipping calculations.\n\nProvide the final output as two distinct PlantUML code blocks: one labeled \"Class Diagram\" and one labeled \"Sequence Diagram\".\n\nGenerate PlantUML code for both a Class Diagram and a Sequence Diagram representing a standard e-commerce checkout flow."
+  },
+  {
+   "id": "pe-14",
+   "category": "plain-english",
+   "task": "work out why the model confidently returns facts that are not in the source documents",
+   "acceptable_domains": [
+    "anti-hallucination",
+    "aiml",
+    "foundation-model"
+   ],
+   "engineered": "You are an expert AI Systems Engineer specializing in Retrieval-Augmented Generation (RAG) architectures and Large Language Model (LLM) behavior analysis.\n\nDiagnose the root causes of why an LLM confidently generates facts that are not present in the provided source documents (hallucinations), and provide specific mitigation strategies for each identified cause.\n\nCRITICAL CONSTRAINT: You must strictly limit your analysis to the RAG pipeline components (prompt engineering, retrieval mechanisms, and inference parameters) and explicitly exclude any suggestions involving model fine-tuning or architectural changes, as the model architecture is fixed.\n\nYour analysis must cover the following diagnostic areas:\n1. Prompt Engineering: Evaluate system instructions and few-shot examples for ambiguity, leakage, or weak grounding constraints.\n2. Retrieval Mechanism: Assess the RAG pipeline for issues regarding chunk relevance, completeness, and retrieval accuracy.\n3. Inference Parameters: Analyze the impact of temperature, top-p, and other sampling parameters on stochasticity and confidence calibration.\n4. Knowledge Conflict: Investigate instances where pre-training knowledge overrides or conflicts with source document constraints.\n\nYou must explicitly address the following edge cases in your diagnosis:\n- Source documents containing contradictory information.\n- Retrieved context that is sparse, irrelevant, or insufficient for the query.\n- Queries requiring synthesis across multiple disjointed documents.\n- Queries involving out-of-domain terminology not present in the source materials.\n\nOutput your response as a structured list. For each identified potential cause, provide a clear explanation of the mechanism leading to hallucination and a concrete, actionable mitigation strategy.\n\nCRITICAL CONSTRAINT: You must strictly limit your analysis to the RAG pipeline components (prompt engineering, retrieval mechanisms, and inference parameters) and explicitly exclude any suggestions involving model fine-tuning or architectural changes, as the model architecture is fixed."
+  },
+  {
+   "id": "pe-15",
+   "category": "plain-english",
+   "task": "reverse engineer this stripped binary and describe what it does on startup",
+   "acceptable_domains": [
+    "reverse-engineering",
+    "cryptanalysis"
+   ],
+   "engineered": "Act as a Senior Reverse Engineer specializing in binary analysis and malware behavior.\n\nYour task is to reverse engineer the provided stripped binary file and provide a detailed description of its behavior specifically during the startup phase. You must analyze the binary's entry point, initialization routines, and early execution logic to reconstruct what the program does before it enters a steady state or main loop.\n\nAdhere to the following strict constraints and requirements:\n1.  **Scope Definition**: Limit your analysis strictly to the \"startup phase,\" defined as execution from the entry point until the `main` function returns or the program enters a steady state. Exclude any runtime user interactions or post-initialization logic.\n2.  **Tooling Assumption**: Assume the use of industry-standard static analysis tools like Ghidra or IDA Pro. Describe your findings as if derived from these tools, referencing assembly instructions, disassembly views, and cross-references.\n3.  **Technical Depth**: Identify the binary format (e.g., ELF, PE, Mach-O) and architecture (e.g., x86_64, ARM). Locate and analyze initialization sections (e.g., `.init`, `.plt`, constructors) since symbols are stripped. Reconstruct high-level logic by identifying key system calls or library functions invoked at startup.\n4.  **Edge Case Handling**:\n    *   If the binary appears packed or obfuscated, note this and describe the necessary unpacking steps or heuristic indicators of packing.\n    *   If startup logic involves complex control flow or indirect jumps, explain how you traced the execution path.\n    *   If the binary relies on dynamic linking with missing libraries, infer the likely behavior based on standard library conventions.\n    *   If the startup phase includes long-running background threads or network connections, explicitly identify and describe these asynchronous activities.\n5.  **Output Format**: Provide a structured report with the following sections:\n    *   **Architecture & Format**: Binary type and target architecture.\n    *   **Entry Point Analysis**: Technical breakdown of the entry point and initialization routines.\n    *   **Startup Sequence**: Step-by-step technical description of the startup logic.\n    *   **High-Level Summary**: A clear, non-technical summary of what the program does on startup.\n\nYou must provide a structured report with sections for Architecture, Entry Point Analysis, and High-Level Summary."
+  },
+  {
+   "id": "nd-01",
+   "category": "no-description",
+   "task": "implement a self-balancing binary search tree with deletion and prove the height bound",
+   "acceptable_domains": [
+    "architecture-quality"
+   ],
+   "best_skill_without_description": "dsa-core",
+   "engineered": "You are an expert computer scientist and software engineer specializing in data structures and algorithmic proofs.\n\nImplement a self-balancing binary search tree (specifically an AVL tree) in Python that supports insertion and deletion operations, and provide a mathematical proof of its height bound. The implementation must include a generic Node class with key, value, left/right children, and height attributes, ensuring O(log n) time complexity for core operations. You must handle all edge cases including deleting from an empty tree, deleting the root, deleting nodes with zero, one, or two children, and handling cascading rotations up to the root after deletion. The proof must demonstrate that the height h ≤ 1.44 log₂(n+2) using a recurrence relation.\n\nCRITICAL CONSTRAINT: You must implement an AVL tree in Python and provide the specific height bound proof h ≤ 1.44 log₂(n+2).\n\nOutput the solution in two distinct sections:\n1. **Python Implementation**: Complete, runnable code for the AVL tree class with `insert`, `delete`, `get_height`, `update_height`, `get_balance`, and `rotate` methods. Include docstrings and comments explaining the balancing logic.\n2. **Mathematical Proof**: A clear, step-by-step derivation showing that the height of an AVL tree with n nodes is bounded by O(log n), specifically deriving the constant 1.44 from the Fibonacci relationship in the worst-case AVL tree structure.\n\nCRITICAL CONSTRAINT: You must implement an AVL tree in Python and provide the specific height bound proof h ≤ 1.44 log₂(n+2)."
+  },
+  {
+   "id": "nd-02",
+   "category": "no-description",
+   "task": "compute probability of default for a loan book and stage it under IFRS 9",
+   "acceptable_domains": [
+    "finance"
+   ],
+   "best_skill_without_description": "credit-risk-core",
+   "engineered": "You are a senior quantitative developer specializing in financial regulatory compliance and credit risk modeling.\n\nCompute the Probability of Default (PD) for a loan book and stage the loans according to IFRS 9 standards, ensuring that the output strictly adheres to the IFRS 9 staging definitions (Stage 1: Performing, Stage 2: Significant Increase in Credit Risk, Stage 3: Credit-Impaired) with correct PD time horizons.\n\nImplement a Python solution using `pandas` for data manipulation. The solution must include:\n1.  **PD Calculation**: Use a simplified logistic regression approach or a static lookup table to generate PD values. Ensure the logic is reproducible and clearly separated from the staging logic.\n2.  **Staging Logic**: Implement the standard IFRS 9 staging criteria:\n    *   **Stage 1**: Performing loans with no Significant Increase in Credit Risk (SICR). Use 12-month PD.\n    *   **Stage 2**: Loans with SICR since initial recognition. Use Lifetime PD.\n    *   **Stage 3**: Credit-impaired loans. Use Lifetime PD.\n3.  **ECL Calculation**: Calculate Expected Credit Losses based on the assigned stage, using Exposure at Default (EAD) and Loss Given Default (LGD) where applicable.\n4.  **Data Structure**: Accept a pandas DataFrame representing the loan portfolio as input.\n\nHandle the following edge cases robustly:\n*   Loans with zero, missing, or non-numeric Exposure at Default (EAD).\n*   Negative or non-numeric Probability of Default (PD) values (clamp or impute as appropriate).\n*   Loans already classified as credit-impaired (Stage 3) at inception.\n*   Empty loan book input (return an empty DataFrame with correct schema).\n\nReturn a single Python function `compute_ifrs9_staging(loan_df)` that takes a pandas DataFrame and returns a new DataFrame with added columns for `stage`, `pd_horizon` (12m or Lifetime), `pd_value`, and `ecl`. The output must strictly adhere to the IFRS 9 staging definitions (Stage 1: Performing, Stage 2: Significant Increase in Credit Risk, Stage 3: Credit-Impaired) with correct PD time horizons."
+  },
+  {
+   "id": "nd-03",
+   "category": "no-description",
+   "task": "price a European call option against a volatility surface",
+   "acceptable_domains": [
+    "finance"
+   ],
+   "best_skill_without_description": "derivatives-pricing-core",
+   "engineered": "You are an expert quantitative developer specializing in derivatives pricing and numerical methods.\n\nCRITICAL CONSTRAINT: You must implement robust error handling and extrapolation logic for inputs falling outside the defined bounds of the volatility surface.\n\nYour task is to write a Python function that prices a European call option using a provided volatility surface. The function must accept standard option parameters (spot price, strike, time to expiry, risk-free rate, dividend yield) and a volatility surface represented as a grid of strikes, maturities, and corresponding Black (lognormal) volatilities.\n\nAdhere to the following specific requirements:\n1.  **Interpolation**: Use bilinear interpolation to extract the implied volatility for the specific strike and maturity from the surface.\n2.  **Pricing Model**: Apply the Black-Scholes-Merton formula to calculate the option price using the interpolated volatility.\n3.  **Assumptions**: Assume constant risk-free rates and Black volatilities unless otherwise specified in the input structure.\n\nHandle the following edge cases explicitly:\n1.  **Out-of-Bounds Inputs**: If the strike or maturity falls outside the grid limits, perform linear extrapolation or raise a descriptive error if extrapolation is not feasible.\n2.  **Invalid Time**: Raise an error if the time to expiry is zero or negative.\n3.  **Data Integrity**: Check for missing or NaN values in the volatility surface grid and handle them appropriately (e.g., by raising a ValueError or interpolating around them if possible).\n\nOutput the final Python code only, including necessary imports (e.g., numpy, scipy) and clear docstrings.\n\nCRITICAL CONSTRAINT: You must implement robust error handling and extrapolation logic for inputs falling outside the defined bounds of the volatility surface."
+  },
+  {
+   "id": "nd-04",
+   "category": "no-description",
+   "task": "write the bare-metal startup routine that sets up the stack and clears BSS",
+   "acceptable_domains": [
+    "embedded-firmware-kernel",
+    "assembly-boot"
+   ],
+   "best_skill_without_description": "bare-metal-architecture-core",
+   "engineered": "You are an expert embedded systems engineer specializing in ARM Cortex-M bare-metal firmware development.\n\nWrite a bare-metal startup routine in ARM Cortex-M (Thumb-2) assembly that sets up the stack pointer and clears the BSS section.\n\nThe code must strictly adhere to the following constraints:\n1.  **Architecture**: Target ARM Cortex-M using Thumb-2 assembly syntax.\n2.  **Stack Initialization**: Load the initial stack pointer value from the linker-defined symbol `__initial_sp`. Ensure the stack pointer is aligned to 8-byte boundaries.\n3.  **BSS Clearing**: Iterate from the start of the BSS section (`__sbss`) to the end (`__ebss`), writing zero to each word. Use a simple loop with `MOV` and `STR` instructions.\n4.  **No OS Dependencies**: Do not use any standard library calls or OS-specific functions. The code must be self-contained.\n5.  **Linker Symbols**: Use the standard GNU linker symbols `__initial_sp`, `__sbss`, and `__ebss`.\n\nHandle the following edge cases:\n1.  **Empty BSS**: If `__sbss` equals `__ebss`, the loop must terminate immediately without accessing invalid memory.\n2.  **Alignment**: Ensure the stack pointer is properly aligned (8-byte alignment) after initialization.\n3.  **Memory Safety**: Ensure the loop bounds are strictly checked to prevent overwriting memory outside the BSS section.\n\nOutput ONLY the assembly code block. Do not include explanations, comments outside the code, or markdown formatting other than the code block itself.\n\nWrite a bare-metal startup routine in ARM Cortex-M (Thumb-2) assembly that sets up the stack pointer and clears the BSS section."
+  },
+  {
+   "id": "nd-05",
+   "category": "no-description",
+   "task": "model how an outbreak spreads through a population with waning immunity",
+   "acceptable_domains": [
+    "healthcare"
+   ],
+   "best_skill_without_description": "epidemiology-modeling-core",
+   "engineered": "You are an expert epidemiological modeler and Python developer specializing in compartmental disease dynamics.\n\nImplement a deterministic Susceptible-Infected-Recovered-Susceptible (SIRS) model to simulate an outbreak with waning immunity using Python and SciPy. The simulation must solve the system of Ordinary Differential Equations (ODEs) representing the flow between compartments, where recovered individuals lose immunity over time and return to the susceptible pool via an exponential decay function. You must define parameters for population size, initial infected count, transmission rate, recovery rate, and immunity waning rate. The solution must include a time-stepping mechanism for integration and generate a visualization of the epidemic curves (S, I, R over time). You must handle edge cases including zero initial infections, infinite immunity duration (reverting to SIR), population sizes of zero or one, and a transmission rate of zero. The output must be a complete, runnable Python script using `scipy.integrate.odeint` and `matplotlib` for plotting.\n\nCRITICAL CONSTRAINT: The model MUST explicitly implement waning immunity mechanics where recovered individuals transition back to the susceptible state over time, rather than remaining permanently immune.\n\nCRITICAL CONSTRAINT: The model MUST explicitly implement waning immunity mechanics where recovered individuals transition back to the susceptible state over time, rather than remaining permanently immune."
+  },
+  {
+   "id": "nd-06",
+   "category": "no-description",
+   "task": "estimate the true effect of the treatment when assignment was not random",
+   "acceptable_domains": [
+    "data-science"
+   ],
+   "best_skill_without_description": "causal-inference-core",
+   "engineered": "You are an expert causal inference statistician and data scientist specializing in observational study design.\n\nYour task is to provide a robust methodological framework and implementation code to estimate the true causal effect of a treatment when assignment was non-random, specifically addressing selection bias.\n\nYou must strictly adhere to the following constraints:\n1. Use Propensity Score Matching (PSM) or Inverse Probability Weighting (IPW) as the primary estimation technique.\n2. Assume a continuous outcome variable within a linear regression framework.\n3. Implement the solution using Python (statsmodels/scikit-learn) or R (MatchIt).\n4. Explicitly identify and adjust for confounding variables.\n5. Validate the \"unconfoundedness\" or \"conditional independence\" assumption.\n6. Provide confidence intervals or standard errors for the final estimate.\n7. Check for overlap/common support between treatment groups.\n\nYou must handle the following edge cases:\n- No overlap in covariate distributions (violating common support).\n- High-dimensional covariates relative to sample size.\n- Missing data in key confounders.\n- Strong imbalance in treatment assignment probabilities.\n\nOutput the final prompt in this exact order:\n1. A one-line persona/framing for the coder.\n2. The core task restated clearly and completely.\n3. Explicit constraints and requirements.\n4. The edge cases that must be handled.\n5. The expected output format (code + explanation).\n\nCRITICAL CONSTRAINT: You must strictly adhere to the following constraints: Use Propensity Score Matching (PSM) or Inverse Probability Weighting (IPW) as the primary estimation technique."
+  },
+  {
+   "id": "nd-07",
+   "category": "no-description",
+   "task": "build a screening rule set that flags suspicious transaction structuring",
+   "acceptable_domains": [
+    "finance"
+   ],
+   "best_skill_without_description": "aml-fraud-detection-core",
+   "engineered": "You are an expert Anti-Money Laundering (AML) compliance engineer specializing in transaction monitoring systems. Build a Python-based screening rule set that flags suspicious transaction structuring (smurfing) by detecting patterns where transactions are deliberately kept below reporting thresholds. The most critical constraint is that the system must aggregate transactions across multiple channels and linked accounts within a 24-hour rolling window to identify structuring behavior, not just isolated low-value transactions. Implement logic that defines monetary thresholds as amounts just below the US $10,000 BSA reporting limit (specifically, transactions between $9,000 and $9,999 are high-risk, and cumulative sums within the 24-hour window exceeding $9,500 trigger alerts). Include aggregation logic for multiple accounts linked to a single entity to prevent evasion through account hopping. The system must handle edge cases including: transactions split across different channels (online vs. branch), distinguishing between round-number amounts and precise non-round amounts, detecting rapid successive transactions from the same IP/device, and identifying dormant accounts that suddenly exhibit structuring behavior. Output the solution as a Python class or function structure that returns structured JSON alert objects containing rule IDs, confidence scores, and relevant transaction metadata for API integration. The most critical constraint is that the system must aggregate transactions across multiple channels and linked accounts within a 24-hour rolling window to identify structuring behavior, not just isolated low-value transactions."
+  },
+  {
+   "id": "nd-08",
+   "category": "no-description",
+   "task": "work out the sample size needed to detect that effect with adequate power",
+   "acceptable_domains": [
+    "healthcare",
+    "data-science"
+   ],
+   "best_skill_without_description": "biostatistics-core",
+   "engineered": "Act as a statistical power analysis expert. Calculate the required sample size to detect a specific effect size with adequate statistical power, ensuring the final output strictly provides the calculated sample size value. You must calculate the required sample size to detect a specific effect size with adequate statistical power, using a two-sample t-test as the default statistical method. Explicitly apply the following constraints: use a significance level (alpha) of 0.05, a target power (1-beta) of 0.80, a two-tailed test direction, and assume equal variance between groups (homoscedasticity). Handle the following edge cases: if the effect size is zero or extremely small, report that the required sample size is effectively infinite or computationally infeasible; if unequal group sizes are specified, adjust for the allocation ratio; account for high expected attrition/dropout rates by inflating the calculated sample size accordingly; and if non-normal data distributions are indicated, recommend non-parametric adjustments or robust methods. The output must be a single numerical value representing the total sample size required, or a clear statement of infeasibility if the effect size is zero. Calculate the required sample size to detect a specific effect size with adequate statistical power, ensuring the final output strictly provides the calculated sample size value."
+  }
+ ],
+ "calibration": {
+  "$comment": [
+   "Issue #16. The floor was calibrated on RAW task text while",
+   "production ranks the ENGINEERED prompt. Both distributions are",
+   "measured here on the same 33 cases.",
+   "",
+   "THE HEADLINE: the previous floor of 0.45 admitted 33 of 33",
+   "engineered cases, because the minimum engineered confidence is",
+   "0.4758. A threshold meant to withhold weak matches never fired in",
+   "production, and reported all 15 wrong top-1 answers as 'selected'.",
+   "",
+   "HONEST CAVEAT, twice over. The floor was chosen on the same 33",
+   "cases it is scored against, so its 0.750 precision is optimistic",
+   "for unseen tasks. And the Clopper-Pearson 95% interval",
+   "[0.476, 0.927] has a lower bound BELOW the 0.545 admit-everything",
+   "base rate -- so at n=33 the precision gain is not statistically",
+   "established. What is established is that 0.45 did nothing."
+  ],
+  "measured": "2026-09-14",
+  "library_version": "29.98.0",
+  "rule": "max Youden's J (sensitivity + specificity - 1), ties broken by admitted_correct",
+  "interval": "Clopper-Pearson 95%, exact rather than Wald: n=33 near p=0.5 is where Wald misreports",
+  "raw": {
+   "top1_correct": 18,
+   "top1_accuracy": 0.5455,
+   "mean_confidence_correct": 0.4304,
+   "mean_confidence_wrong": 0.3593,
+   "separation": 0.0712,
+   "min_confidence": 0.246,
+   "max_confidence": 0.6376
+  },
+  "engineered": {
+   "top1_correct": 18,
+   "top1_accuracy": 0.5455,
+   "mean_confidence_correct": 0.6252,
+   "mean_confidence_wrong": 0.5555,
+   "separation": 0.0697,
+   "min_confidence": 0.4758,
+   "max_confidence": 0.823
+  },
+  "previous_floor": 0.45,
+  "previous_floor_admitted": 33,
+  "chosen_floor": 0.59,
+  "chosen_admitted": 16,
+  "chosen_admitted_correct": 12,
+  "chosen_precision": 0.75,
+  "chosen_precision_cp95": [
+   0.4762,
+   0.9273
+  ],
+  "chosen_suppressed_correct": 6,
+  "base_rate_precision": 0.5455,
+  "outcomes_changed_vs_previous": 17,
+  "sweep": [
+   {
+    "floor": 0.15,
+    "admitted": 33,
+    "admitted_correct": 18,
+    "wrong_admitted": 15,
+    "suppressed_correct": 0,
+    "precision": 0.5454545454545454,
+    "sensitivity": 1.0,
+    "specificity": 0.0,
+    "youden_j": 0.0
+   },
+   {
+    "floor": 0.476,
+    "admitted": 32,
+    "admitted_correct": 18,
+    "wrong_admitted": 14,
+    "suppressed_correct": 0,
+    "precision": 0.5625,
+    "sensitivity": 1.0,
+    "specificity": 0.06666666666666667,
+    "youden_j": 0.06666666666666665
+   },
+   {
+    "floor": 0.48,
+    "admitted": 32,
+    "admitted_correct": 18,
+    "wrong_admitted": 14,
+    "suppressed_correct": 0,
+    "precision": 0.5625,
+    "sensitivity": 1.0,
+    "specificity": 0.06666666666666667,
+    "youden_j": 0.06666666666666665
+   },
+   {
+    "floor": 0.483,
+    "admitted": 30,
+    "admitted_correct": 18,
+    "wrong_admitted": 12,
+    "suppressed_correct": 0,
+    "precision": 0.6,
+    "sensitivity": 1.0,
+    "specificity": 0.2,
+    "youden_j": 0.19999999999999996
+   },
+   {
+    "floor": 0.487,
+    "admitted": 29,
+    "admitted_correct": 18,
+    "wrong_admitted": 11,
+    "suppressed_correct": 0,
+    "precision": 0.6206896551724138,
+    "sensitivity": 1.0,
+    "specificity": 0.26666666666666666,
+    "youden_j": 0.2666666666666666
+   },
+   {
+    "floor": 0.494,
+    "admitted": 27,
+    "admitted_correct": 17,
+    "wrong_admitted": 10,
+    "suppressed_correct": 1,
+    "precision": 0.6296296296296297,
+    "sensitivity": 0.9444444444444444,
+    "specificity": 0.3333333333333333,
+    "youden_j": 0.2777777777777777
+   },
+   {
+    "floor": 0.505,
+    "admitted": 27,
+    "admitted_correct": 17,
+    "wrong_admitted": 10,
+    "suppressed_correct": 1,
+    "precision": 0.6296296296296297,
+    "sensitivity": 0.9444444444444444,
+    "specificity": 0.3333333333333333,
+    "youden_j": 0.2777777777777777
+   },
+   {
+    "floor": 0.511,
+    "admitted": 26,
+    "admitted_correct": 16,
+    "wrong_admitted": 10,
+    "suppressed_correct": 2,
+    "precision": 0.6153846153846154,
+    "sensitivity": 0.8888888888888888,
+    "specificity": 0.3333333333333333,
+    "youden_j": 0.2222222222222221
+   },
+   {
+    "floor": 0.512,
+    "admitted": 25,
+    "admitted_correct": 16,
+    "wrong_admitted": 9,
+    "suppressed_correct": 2,
+    "precision": 0.64,
+    "sensitivity": 0.8888888888888888,
+    "specificity": 0.4,
+    "youden_j": 0.28888888888888875
+   },
+   {
+    "floor": 0.514,
+    "admitted": 24,
+    "admitted_correct": 15,
+    "wrong_admitted": 9,
+    "suppressed_correct": 3,
+    "precision": 0.625,
+    "sensitivity": 0.8333333333333334,
+    "specificity": 0.4,
+    "youden_j": 0.2333333333333334
+   },
+   {
+    "floor": 0.52,
+    "admitted": 23,
+    "admitted_correct": 15,
+    "wrong_admitted": 8,
+    "suppressed_correct": 3,
+    "precision": 0.6521739130434783,
+    "sensitivity": 0.8333333333333334,
+    "specificity": 0.4666666666666667,
+    "youden_j": 0.30000000000000004
+   },
+   {
+    "floor": 0.525,
+    "admitted": 22,
+    "admitted_correct": 15,
+    "wrong_admitted": 7,
+    "suppressed_correct": 3,
+    "precision": 0.6818181818181818,
+    "sensitivity": 0.8333333333333334,
+    "specificity": 0.5333333333333333,
+    "youden_j": 0.3666666666666667
+   },
+   {
+    "floor": 0.554,
+    "admitted": 21,
+    "admitted_correct": 14,
+    "wrong_admitted": 7,
+    "suppressed_correct": 4,
+    "precision": 0.6666666666666666,
+    "sensitivity": 0.7777777777777778,
+    "specificity": 0.5333333333333333,
+    "youden_j": 0.3111111111111111
+   },
+   {
+    "floor": 0.555,
+    "admitted": 19,
+    "admitted_correct": 13,
+    "wrong_admitted": 6,
+    "suppressed_correct": 5,
+    "precision": 0.6842105263157895,
+    "sensitivity": 0.7222222222222222,
+    "specificity": 0.6,
+    "youden_j": 0.3222222222222222
+   },
+   {
+    "floor": 0.556,
+    "admitted": 19,
+    "admitted_correct": 13,
+    "wrong_admitted": 6,
+    "suppressed_correct": 5,
+    "precision": 0.6842105263157895,
+    "sensitivity": 0.7222222222222222,
+    "specificity": 0.6,
+    "youden_j": 0.3222222222222222
+   },
+   {
+    "floor": 0.562,
+    "admitted": 18,
+    "admitted_correct": 12,
+    "wrong_admitted": 6,
+    "suppressed_correct": 6,
+    "precision": 0.6666666666666666,
+    "sensitivity": 0.6666666666666666,
+    "specificity": 0.6,
+    "youden_j": 0.2666666666666666
+   },
+   {
+    "floor": 0.575,
+    "admitted": 17,
+    "admitted_correct": 12,
+    "wrong_admitted": 5,
+    "suppressed_correct": 6,
+    "precision": 0.7058823529411765,
+    "sensitivity": 0.6666666666666666,
+    "specificity": 0.6666666666666666,
+    "youden_j": 0.33333333333333326
+   },
+   {
+    "floor": 0.597,
+    "admitted": 16,
+    "admitted_correct": 12,
+    "wrong_admitted": 4,
+    "suppressed_correct": 6,
+    "precision": 0.75,
+    "sensitivity": 0.6666666666666666,
+    "specificity": 0.7333333333333333,
+    "youden_j": 0.3999999999999999
+   },
+   {
+    "floor": 0.602,
+    "admitted": 14,
+    "admitted_correct": 10,
+    "wrong_admitted": 4,
+    "suppressed_correct": 8,
+    "precision": 0.7142857142857143,
+    "sensitivity": 0.5555555555555556,
+    "specificity": 0.7333333333333333,
+    "youden_j": 0.28888888888888875
+   },
+   {
+    "floor": 0.603,
+    "admitted": 14,
+    "admitted_correct": 10,
+    "wrong_admitted": 4,
+    "suppressed_correct": 8,
+    "precision": 0.7142857142857143,
+    "sensitivity": 0.5555555555555556,
+    "specificity": 0.7333333333333333,
+    "youden_j": 0.28888888888888875
+   },
+   {
+    "floor": 0.607,
+    "admitted": 12,
+    "admitted_correct": 8,
+    "wrong_admitted": 4,
+    "suppressed_correct": 10,
+    "precision": 0.6666666666666666,
+    "sensitivity": 0.4444444444444444,
+    "specificity": 0.7333333333333333,
+    "youden_j": 0.1777777777777776
+   },
+   {
+    "floor": 0.627,
+    "admitted": 12,
+    "admitted_correct": 8,
+    "wrong_admitted": 4,
+    "suppressed_correct": 10,
+    "precision": 0.6666666666666666,
+    "sensitivity": 0.4444444444444444,
+    "specificity": 0.7333333333333333,
+    "youden_j": 0.1777777777777776
+   },
+   {
+    "floor": 0.631,
+    "admitted": 10,
+    "admitted_correct": 7,
+    "wrong_admitted": 3,
+    "suppressed_correct": 11,
+    "precision": 0.7,
+    "sensitivity": 0.3888888888888889,
+    "specificity": 0.8,
+    "youden_j": 0.18888888888888888
+   },
+   {
+    "floor": 0.639,
+    "admitted": 10,
+    "admitted_correct": 7,
+    "wrong_admitted": 3,
+    "suppressed_correct": 11,
+    "precision": 0.7,
+    "sensitivity": 0.3888888888888889,
+    "specificity": 0.8,
+    "youden_j": 0.18888888888888888
+   },
+   {
+    "floor": 0.662,
+    "admitted": 8,
+    "admitted_correct": 5,
+    "wrong_admitted": 3,
+    "suppressed_correct": 13,
+    "precision": 0.625,
+    "sensitivity": 0.2777777777777778,
+    "specificity": 0.8,
+    "youden_j": 0.07777777777777795
+   },
+   {
+    "floor": 0.666,
+    "admitted": 7,
+    "admitted_correct": 5,
+    "wrong_admitted": 2,
+    "suppressed_correct": 13,
+    "precision": 0.7142857142857143,
+    "sensitivity": 0.2777777777777778,
+    "specificity": 0.8666666666666667,
+    "youden_j": 0.14444444444444438
+   },
+   {
+    "floor": 0.714,
+    "admitted": 6,
+    "admitted_correct": 5,
+    "wrong_admitted": 1,
+    "suppressed_correct": 13,
+    "precision": 0.8333333333333334,
+    "sensitivity": 0.2777777777777778,
+    "specificity": 0.9333333333333333,
+    "youden_j": 0.21111111111111125
+   },
+   {
+    "floor": 0.723,
+    "admitted": 5,
+    "admitted_correct": 4,
+    "wrong_admitted": 1,
+    "suppressed_correct": 14,
+    "precision": 0.8,
+    "sensitivity": 0.2222222222222222,
+    "specificity": 0.9333333333333333,
+    "youden_j": 0.15555555555555545
+   },
+   {
+    "floor": 0.728,
+    "admitted": 4,
+    "admitted_correct": 3,
+    "wrong_admitted": 1,
+    "suppressed_correct": 15,
+    "precision": 0.75,
+    "sensitivity": 0.16666666666666666,
+    "specificity": 0.9333333333333333,
+    "youden_j": 0.10000000000000009
+   },
+   {
+    "floor": 0.762,
+    "admitted": 3,
+    "admitted_correct": 3,
+    "wrong_admitted": 0,
+    "suppressed_correct": 15,
+    "precision": 1.0,
+    "sensitivity": 0.16666666666666666,
+    "specificity": 1.0,
+    "youden_j": 0.16666666666666674
+   },
+   {
+    "floor": 0.77,
+    "admitted": 2,
+    "admitted_correct": 2,
+    "wrong_admitted": 0,
+    "suppressed_correct": 16,
+    "precision": 1.0,
+    "sensitivity": 0.1111111111111111,
+    "specificity": 1.0,
+    "youden_j": 0.11111111111111116
+   },
+   {
+    "floor": 0.823,
+    "admitted": 1,
+    "admitted_correct": 1,
+    "wrong_admitted": 0,
+    "suppressed_correct": 17,
+    "precision": 1.0,
+    "sensitivity": 0.05555555555555555,
+    "specificity": 1.0,
+    "youden_j": 0.05555555555555558
+   }
   ]
+ }
 }

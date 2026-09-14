@@ -78,8 +78,40 @@ At 0.5 a winner with no lead over a rival domain keeps half its strength: the
 match may still be right, so the answer is reported with reduced confidence
 rather than suppressed."""
 
-CONFIDENCE_FLOOR = 0.45
-"""Below this, the outcome is low_confidence rather than selected."""
+CONFIDENCE_FLOOR = 0.59
+"""Below this, the outcome is low_confidence rather than selected.
+
+Calibrated against the ENGINEERED prompt, which is what production ranks
+(`orchestrator.py`: engineer_context -> engineer_prompt -> knowledge.resolve).
+The previous value, 0.45, was measured on RAW task text and applied to
+engineered prompts -- issue #16.
+
+**The old value suppressed nothing.** Measured over the 33 frozen held-out
+cases, engineered confidence ranges 0.4758 to 0.8230, so a 0.45 floor admitted
+**33 of 33** and every match was reported `selected`, including the 15 whose
+top-1 domain was wrong. A threshold calibrated to withhold a weak match never
+fired once in production. That is the defect, and it is worse than a floor
+merely set a little low.
+
+Engineering the prompt shifts the whole distribution up by roughly 0.2 -- mean
+confidence on a WRONG engineered match (0.5555) exceeds mean confidence on a
+CORRECT raw one (0.4304) -- while barely improving separation (+0.0712 raw vs
++0.0697 engineered). So the fix is a re-sited threshold, not a better one.
+
+0.59 is the measured optimum by Youden's J on that set: 16 of 33 admitted, 12
+correct, precision 0.750 against a 0.545 admit-everything base rate, six
+correct matches suppressed to low_confidence.
+
+**Honest limit, which is why the interval is recorded rather than just the
+point estimate.** The Clopper-Pearson 95% interval on that precision is
+[0.476, 0.927], whose lower bound sits *below* the 0.545 base rate. At n=33 the
+improvement is therefore NOT statistically established -- and the floor was
+chosen on the same 33 cases it is scored against, so 0.750 is optimistic for
+unseen tasks. The defensible claim is narrow: the old value demonstrably did
+nothing, and this one is the best available estimate from the only frozen
+evidence there is. Provenance and the full sweep live in
+`tests/kgf/fixtures/heldout_routing.json`.
+"""
 
 NO_MATCH_FLOOR = 0.15
 """Below this, nothing matched in any useful sense."""
