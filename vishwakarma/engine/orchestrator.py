@@ -242,11 +242,11 @@ def detect_language(task: str, router: Router, client: LLMClient, on_event: OnEv
         client,
         priority="interactive",
         on_event=on_event,
+        light_reasoning=True,
         temperature=0.0,
         max_tokens=60,
-        reasoning_effort="low",
     )
-    normalized = raw.strip().lower()
+    normalized = strip_reasoning_trace(raw).strip().lower()
     for option in options:
         if option in normalized:
             return option
@@ -285,11 +285,11 @@ def classify_complexity(task: str, router: Router, client: LLMClient, on_event: 
         client,
         priority="interactive",
         on_event=on_event,
+        light_reasoning=True,
         temperature=0.0,
         max_tokens=60,
-        reasoning_effort="low",
     )
-    return "complex" if "complex" in raw.strip().lower() else "simple"
+    return "complex" if "complex" in strip_reasoning_trace(raw).strip().lower() else "simple"
 
 
 SOLUTION_ARCHITECT_SYSTEM_PROMPT = (
