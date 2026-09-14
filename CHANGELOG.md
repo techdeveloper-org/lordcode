@@ -6,6 +6,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.7] - 2026-09-14
+
+### Fixed
+
+**A stalled provider is now detected in 30s, not 120 — part of #56.** The
+timeout is httpx's *inter-chunk* read timeout, so 120s meant a provider emitting
+one token every 119 seconds read as perfectly healthy. Since the router advances
+only on exceptions and a slow stream raises none, such a call had no timeout, no
+error and no failover. 30s is still an order of magnitude above any observed
+inter-chunk gap on a working provider.
+
+Recorded while fixing it: this **does** bound time-to-first-byte. Measured
+against a socket that accepts and then stays silent, `httpx.ReadTimeout` fires
+at 4.6s against a 4s configured read timeout — so a server that accepts and
+sends nothing is killed by the transport, and only the "alive but crawling" case
+needs the throughput bound still to come.
+
+**A dead provider is probed once, not once per role — closes #57.**
+`validate_startup` memoised catalogue *successes* only; every failure arm
+returned without recording anything, so an unreachable or mis-keyed provider was
+re-probed for each role naming it. Measured at **13.8s per probe**, so four
+roles spent ~55s of startup learning the same fact four times.
+
+Two measured wins came with it: the local `base_url`s use `127.0.0.1` rather
+than `localhost` (which resolves to both `::1` and `127.0.0.1`, doubling every
+connect attempt), and the startup catalogue probe no longer uses the SDK's
+default retries — it asks *"is the provider there"*, and the answer does not
+change on retry. Together **13.8s → 2.0s**.
+
+Zero cost today, because only Groq is wired and reachable. It becomes live the
+moment a second provider joins more than one role's candidate list.
+
+**`strip_reasoning_trace` takes the last closing tag, as its docstring always
+said — closes #58.** The implementation used `.search()`, which finds the first,
+leaving an entire second trace inside what it returned as "the answer". Fixed in
+the direction the contract already specified rather than by rewriting the
+contract to match the code.
+
+It matters because this now guards both task classifiers, and both parse by
+substring: a surviving trace containing the word "complex" makes
+`classify_complexity` return `"complex"` regardless of the model's conclusion —
+the same inversion #53 removed, reachable again through a repeated trace.
+
+Accepted cost, checked rather than assumed and pinned by a test: an answer
+legitimately containing the literal `</think>` is truncated there. `generate.py`
+does not import this function, so the coder's JSON path is untouched.
+
 ## [1.0.6] - 2026-09-14
 
 ### Fixed

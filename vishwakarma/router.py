@@ -169,6 +169,19 @@ class Router:
             ConfigError: If a role has no usable candidate at all.
         """
         live_ids_cache: dict[tuple[str, str | None], set[str]] = {}
+        unreachable_cache: dict[tuple[str, str | None], str] = {}
+        """Why a provider could not be probed, so it is probed at most ONCE.
+
+        `live_ids_cache` memoises only successes; every failure arm below used to
+        `continue` without recording anything, so a provider that is down, dead or
+        mis-keyed was re-probed once per role naming it. Measured against an absent
+        provider on `localhost`: 13.8s each time, so four roles cost ~55s of startup
+        to learn the same fact four times (#57).
+
+        Zero cost today because only groq is wired and reachable -- and live the
+        moment a second provider joins more than one role's candidate list, which
+        is exactly what the xkiro work does.
+        """
 
         for role, candidates in self._models.roles.items():
             skipped: list[str] = []
@@ -188,12 +201,17 @@ class Router:
                     continue
 
                 cache_key = (candidate.provider, candidate.api_key_env)
+                if cache_key in unreachable_cache:
+                    skipped.append(f"{label} ({unreachable_cache[cache_key]})")
+                    continue
+
                 if cache_key not in live_ids_cache:
                     try:
                         live_ids_cache[cache_key] = self._client.list_model_ids(
                             candidate.provider, candidate.api_key_env
                         )
                     except ProviderUnavailableError:
+                        unreachable_cache[cache_key] = "provider unavailable"
                         skipped.append(f"{label} (provider unavailable)")
                         continue
                     except _CREDENTIAL_ERRORS as exc:
@@ -214,6 +232,7 @@ class Router:
                             key_name,
                             type(exc).__name__,
                         )
+                        unreachable_cache[cache_key] = f"credential rejected via {key_name}"
                         skipped.append(f"{label} (credential rejected via {key_name})")
                         continue
                     except _RATE_LIMIT_ERRORS:
@@ -243,6 +262,7 @@ class Router:
                             candidate.provider,
                             type(exc).__name__,
                         )
+                        unreachable_cache[cache_key] = f"{candidate.provider} unreachable"
                         skipped.append(f"{label} ({candidate.provider} unreachable)")
                         continue
 
