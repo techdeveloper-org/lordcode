@@ -42,6 +42,34 @@ _REACHABILITY_ERRORS = (
 """Host down, timed out, or a server-side error. Transient; skip quietly."""
 
 
+class ProviderTroubleError(ConfigError):
+    """Every candidate failed, and at least one failed TRANSIENTLY.
+
+    Distinct from its parent because the remedy is opposite. `ConfigError` from
+    an exhausted chain tells the operator to edit `models.yaml`; that advice is
+    correct for a withdrawn model and actively harmful here, where the
+    configuration was fine and the provider simply had a bad thirty seconds. A
+    user who edits working configuration in response to a blip has been misled
+    by the error message (#45).
+
+    A ConfigError subclass so nothing that already catches the documented
+    contract stops working, and so the CLI still exits non-zero -- the run did
+    fail, and pretending otherwise would be worse than the wrong diagnosis.
+    """
+
+
+class ChainExhaustedError(ConfigError):
+    """Every candidate for a role has been walked without one succeeding.
+
+    A ConfigError subclass so existing handlers and the documented contract are
+    unchanged -- but a distinct type, because "the chain ran out" and "your
+    configuration is wrong" are not the same claim and only the caller knows
+    which it was. A caller that saw only TRANSIENT failures on the way down the
+    chain should catch this, put the index back, and report a provider problem;
+    the default message stays correct for a genuinely withdrawn model (#45).
+    """
+
+
 class Router:
     """Resolves a logical model role to a live (provider, model) pair for this session."""
 
@@ -60,6 +88,41 @@ class Router:
         index = self._active_index.get(role, 0)
         return self._models.roles[role][index]
 
+    def active_index(self, role: str) -> int:
+        """This role's current position in its candidate list.
+
+        Exposed so a caller can SNAPSHOT the position before a call that might
+        walk the chain, and give it back if the walk turned out to be nobody's
+        fault. Paired with restore_active_index; see #45.
+        """
+        return self._active_index.get(role, 0)
+
+    def restore_active_index(self, role: str, index: int) -> None:
+        """Put a role back to a previously snapshotted position.
+
+        The one writer that moves the index BACKWARDS, and deliberately narrow.
+        `handle_unavailable` advances permanently ("for the rest of this
+        session") because a withdrawn model stays withdrawn -- correct for that
+        case, wrong when the failures were transient. A provider having a bad
+        thirty seconds must not silently demote a role's preferred model for the
+        remaining lifetime of the process.
+
+        Only rolls back, never forward: passing a larger index than the current
+        one is ignored rather than used as a shortcut to advance, so this cannot
+        become a second way to do what handle_unavailable does.
+        """
+        current = self._active_index.get(role, 0)
+        if index >= current:
+            return
+        self._active_index[role] = index
+        candidate = self._models.roles[role][index]
+        logger.info(
+            "Role '%s': restored to %s/%s -- the failures that advanced it were transient.",
+            role,
+            candidate.provider,
+            candidate.model,
+        )
+
     def handle_unavailable(self, role: str, failed: RoleCandidate) -> RoleCandidate:
         """Advance a role past a failed candidate to its next configured option.
 
@@ -76,7 +139,7 @@ class Router:
         candidates = self._models.roles[role]
         next_index = self._active_index.get(role, 0) + 1
         if next_index >= len(candidates):
-            raise ConfigError(
+            raise ChainExhaustedError(
                 f"Role '{role}': every configured candidate is unavailable "
                 f"(last tried {failed.provider}/{failed.model}). Add more candidates to models.yaml."
             )

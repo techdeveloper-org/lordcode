@@ -21,7 +21,7 @@ from vishwakarma.llm_client import (
     ProviderUnavailableError,
     RateLimitExhaustedError,
 )
-from vishwakarma.router import Router
+from vishwakarma.router import ChainExhaustedError, ProviderTroubleError, Router
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,12 @@ def call_role(
     Raises:
         ConfigError: If every candidate for this role is unavailable.
     """
+    # Snapshotted so a chain walked entirely by TRANSIENT faults can be given
+    # back. handle_unavailable advances permanently, which is right for a
+    # withdrawn model and wrong for a provider having a bad thirty seconds (#45).
+    entry_index = router.active_index(role)
+    saw_transient = False
+
     while True:
         candidate = router.resolve(role)
         event_base = {
@@ -173,7 +179,30 @@ def call_role(
                 candidate.model,
                 exc,
             )
-            router.handle_unavailable(role, candidate)
+            if isinstance(exc, openai.APIError) and not isinstance(exc, ModelUnavailableError):
+                # The provider answered badly rather than the model being gone.
+                # Recorded so that if this walk exhausts the chain, the index can
+                # be handed back instead of the role being demoted for the rest
+                # of the session over a blip.
+                saw_transient = True
+            try:
+                router.handle_unavailable(role, candidate)
+            except ChainExhaustedError:
+                if not saw_transient:
+                    raise
+                # Every candidate is spent, but at least one went down to a
+                # transient -- so "every configured candidate is unavailable,
+                # add more candidates to models.yaml" is a false diagnosis.
+                # Put the role back where it started and say what actually
+                # happened, so a retry begins from the preferred candidate.
+                router.restore_active_index(role, entry_index)
+                raise ProviderTroubleError(
+                    f"Role '{role}': every candidate failed, and at least one failed "
+                    f"transiently (last: {candidate.provider}/{candidate.model} -- {exc}). "
+                    f"This is a provider problem, not a configuration one -- the candidate "
+                    f"list has been left untouched. Retry; if it persists, check the "
+                    f"provider's status."
+                ) from exc
             continue
 
         duration_ms = int((time.monotonic() - started) * 1000)
