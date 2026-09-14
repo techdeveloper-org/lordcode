@@ -11,10 +11,35 @@ from __future__ import annotations
 
 import logging
 
+import openai
+
 from vishwakarma.config import ConfigError, ModelConfig, RoleCandidate
 from vishwakarma.llm_client import LLMClient, ModelUnavailableError, ProviderUnavailableError
 
 logger = logging.getLogger(__name__)
+
+# Startup catalogue-probe failures, split by what the operator should DO about
+# them. A blanket `except openai.APIError` would collapse all three, and every
+# one of these is a subclass of it -- which is why the split is spelled out
+# rather than left to one catch.
+#
+# ORDER MATTERS in validate_startup's except clauses: these are not disjoint.
+# RateLimitError and the credential errors are all APIStatusError subclasses,
+# and APIStatusError is where the 5xx arm lives, so the narrow arms must be
+# caught BEFORE _REACHABILITY_ERRORS or they would be swallowed by it.
+_CREDENTIAL_ERRORS = (openai.AuthenticationError, openai.PermissionDeniedError)
+"""The key is wrong, not the host. Actionable configuration, so WARNING."""
+
+_RATE_LIMIT_ERRORS = (openai.RateLimitError,)
+"""Throttled while LISTING models. Says nothing about the model itself."""
+
+_REACHABILITY_ERRORS = (
+    openai.APIConnectionError,
+    openai.APITimeoutError,
+    openai.InternalServerError,
+    openai.APIStatusError,
+)
+"""Host down, timed out, or a server-side error. Transient; skip quietly."""
 
 
 class Router:
@@ -83,15 +108,20 @@ class Router:
         live_ids_cache: dict[tuple[str, str | None], set[str]] = {}
 
         for role, candidates in self._models.roles.items():
+            skipped: list[str] = []
             for index, candidate in enumerate(candidates):
+                label = f"{candidate.provider}/{candidate.model}"
                 if not self._client.is_available(candidate.provider, candidate.api_key_env):
-                    logger.info(
-                        "Role '%s' candidate %s/%s skipped: no API key set (%s).",
-                        role,
-                        candidate.provider,
-                        candidate.model,
-                        candidate.api_key_env or f"provider '{candidate.provider}' default key",
+                    key_name = (
+                        candidate.api_key_env or f"provider '{candidate.provider}' default key"
                     )
+                    logger.info(
+                        "Role '%s' candidate %s skipped: no API key set (%s).",
+                        role,
+                        label,
+                        key_name,
+                    )
+                    skipped.append(f"{label} (no API key: {key_name})")
                     continue
 
                 cache_key = (candidate.provider, candidate.api_key_env)
@@ -101,22 +131,73 @@ class Router:
                             candidate.provider, candidate.api_key_env
                         )
                     except ProviderUnavailableError:
+                        skipped.append(f"{label} (provider unavailable)")
+                        continue
+                    except _CREDENTIAL_ERRORS as exc:
+                        # An actionable configuration fault, not an outage, so it is
+                        # the one catalogue failure that warrants WARNING: a typo'd
+                        # key is something the operator can fix, and the existing
+                        # missing-key path logs at INFO where nobody sees it.
+                        key_name = (
+                            candidate.api_key_env
+                            or f"provider '{candidate.provider}' default key"
+                        )
+                        logger.warning(
+                            "Role '%s' candidate %s skipped: %s rejected the credential in "
+                            "%s (%s). Check that key rather than the model.",
+                            role,
+                            label,
+                            candidate.provider,
+                            key_name,
+                            type(exc).__name__,
+                        )
+                        skipped.append(f"{label} (credential rejected via {key_name})")
+                        continue
+                    except _RATE_LIMIT_ERRORS:
+                        # NOT a skip. A throttled catalogue endpoint says nothing
+                        # about whether the model works, and skipping here would
+                        # retire the candidate for the whole session -- _active_index
+                        # never resets. Admit it unverified and let the first real
+                        # call decide.
+                        logger.info(
+                            "Role '%s' candidate %s admitted unverified: %s throttled the "
+                            "catalogue listing, which is not evidence about the model.",
+                            role,
+                            label,
+                            candidate.provider,
+                        )
+                        self._active_index[role] = index
+                        break
+                    except _REACHABILITY_ERRORS as exc:
+                        # Unreachable host, timeout, or a 5xx. Survivable at runtime
+                        # via failover, so it must be survivable here too -- this
+                        # used to escape and kill startup outright, naming neither
+                        # the role nor the provider (#41).
+                        logger.info(
+                            "Role '%s' candidate %s skipped: %s unreachable (%s).",
+                            role,
+                            label,
+                            candidate.provider,
+                            type(exc).__name__,
+                        )
+                        skipped.append(f"{label} ({candidate.provider} unreachable)")
                         continue
 
                 if candidate.model not in live_ids_cache[cache_key]:
                     logger.info(
-                        "Role '%s' candidate %s/%s skipped: not in %s's live catalog.",
+                        "Role '%s' candidate %s skipped: not in %s's live catalog.",
                         role,
-                        candidate.provider,
-                        candidate.model,
+                        label,
                         candidate.provider,
                     )
+                    skipped.append(f"{label} (not in live catalog)")
                     continue
 
                 self._active_index[role] = index
                 break
             else:
+                detail = "; ".join(skipped) if skipped else "no candidates configured"
                 raise ConfigError(
-                    f"Role '{role}': none of its configured candidates are usable "
-                    f"(missing API keys or deprecated models). Update models.yaml."
+                    f"Role '{role}': none of its configured candidates are usable. "
+                    f"Tried: {detail}. Update models.yaml."
                 )
