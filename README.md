@@ -76,7 +76,7 @@ API, but hit two unresolved platform-side issues there: a `403
 "Authorization failed"` bug on Personal-org accounts (listing models worked,
 chat completions didn't), and most of the catalog returning `404 "Function
 not found for account"` (listed but never actually entitled). Groq's free
-tier is an ongoing rate-limited tier (~30 RPM / ~6K TPM / ~14.4K RPD), not a
+tier is an ongoing rate-limited tier (~30 RPM configured / 8K TPM measured / ~14.4K RPD), not a
 burnable dollar credit, with no card required -- and every candidate above
 was live-tested and confirmed working before being pinned here.
 

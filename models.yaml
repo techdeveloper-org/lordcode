@@ -2,14 +2,32 @@ providers:
   groq:
     base_url: https://api.groq.com/openai/v1
     api_key_env: GROQ_API_KEY
+    # Left at 30 deliberately. The live header reports
+    # x-ratelimit-limit-requests: 1000, but Groq returns both per-minute and
+    # per-day request ceilings and the observed reset window (2m52.8s) matches
+    # neither cleanly, so which one that figure is remains UNVERIFIED. The
+    # token ceiling below is unambiguous by contrast -- its reset is ~1.1s,
+    # which is a per-minute window. Raising a budget on ambiguous evidence is
+    # how this file acquired its two retired providers.
     rpm_budget: 30
-    # The tokens-per-minute ceiling is the binding constraint, not rpm: at
-    # primary_coder's max_tokens of 8000 (engine/generate.py MAX_CODER_TOKENS)
-    # a single call already exceeds this whole budget, so that role is paced
-    # across minutes no matter how small its prompt is. Enforced by
-    # rate_limiter.py's second bucket; omit the key entirely for a provider
-    # with no published token ceiling (a local Ollama, say).
-    tpm_budget: 6000
+    # MEASURED 2026-09-14 from live response headers, all three configured
+    # models: x-ratelimit-limit-tokens = 8000. This was 6000, which left 25%
+    # of the granted budget unused and made every coder call report
+    # "exceeds the whole ceiling" -- rate_limiter.py:119-126 then admits an
+    # oversized call only when the bucket is completely full and charges it the
+    # entire capacity, so each one waited for a full refill.
+    #
+    # Still the binding constraint, and raising it does not remove the pacing:
+    # primary_coder's estimate is ~9872 tokens (MAX_CODER_TOKENS 8000 plus
+    # ~1900 of prompt), so it exceeds even 8000 and is throttled across
+    # minutes -- just less. Making it fit would mean lowering MAX_CODER_TOKENS
+    # to roughly 6000, which risks truncating a multi-file generation; that is
+    # a separate decision, not a silent change here.
+    #
+    # Omit the key entirely for a provider with no published token ceiling (a
+    # local Ollama, say) -- None disables token accounting rather than
+    # inventing a limit.
+    tpm_budget: 8000
 
   # The four blocks below are DEFINED BUT UNUSED: no role references them, and
   # router.validate_startup only walks the providers a role actually names, so
@@ -81,7 +99,7 @@ providers:
 # platform-level 403 "Authorization failed" bug on Personal-org accounts,
 # and most of its catalog returning 404 "Function not found for account"
 # (listed in /v1/models but never actually entitled for this account).
-# Groq's free tier is an ongoing rate-limited tier (~30 RPM, ~6K TPM,
+# Groq's free tier is an ongoing rate-limited tier (~30 RPM configured, 8K TPM measured,
 # ~14.4K RPD), not a burnable dollar credit, with no card required.
 #
 # 2026-09-11: llama-3.1-8b-instant and llama-3.3-70b-versatile are NOT in
