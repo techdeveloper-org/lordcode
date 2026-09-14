@@ -11,7 +11,7 @@ providers:
     # with no published token ceiling (a local Ollama, say).
     tpm_budget: 6000
 
-  # The three blocks below are DEFINED BUT UNUSED: no role references them, and
+  # The four blocks below are DEFINED BUT UNUSED: no role references them, and
   # router.validate_startup only walks the providers a role actually names, so
   # declaring them costs nothing at startup. Pointing a role at one is then a
   # one-line edit rather than a code change, which is what "any LLM is just
@@ -52,6 +52,29 @@ providers:
     api_key_env: ANTHROPIC_API_KEY
     rpm_budget: 50
     tpm_budget: 20000
+
+  gemini:
+    # Google's Gemini, through its OpenAI-COMPATIBLE endpoint rather than its
+    # native one. The trailing path matters: the native API lives at
+    # /v1beta and is not OpenAI-shaped, while /v1beta/openai/ is the
+    # compatibility layer this client can actually speak. Pointing at the
+    # former fails on the request shape, not on the key -- the same trap the
+    # anthropic-compatible block above documents.
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    api_key_env: GEMINI_API_KEY
+    # UNVERIFIED, and deliberately conservative. Gemini publishes its ceilings
+    # PER MODEL and per tier while this config is per provider, so these are a
+    # floor chosen to be safe across the flash/pro models a role is likely to
+    # name, not a quoted limit. The free tier's request ceiling is the tight
+    # one -- single-digit RPM on some models -- so rpm_budget is set low on
+    # purpose; raise both once the account's real tier is known.
+    #
+    # No key is present in this environment yet, so nothing here has been
+    # live-tested. Read the warning above about NVIDIA NIM and Cerebras: this
+    # file's own history is two providers whose advertised free tiers were not
+    # actually entitled to this account.
+    rpm_budget: 10
+    tpm_budget: 250000
 
 # Switched fully to Groq (2026-09-11) -- NVIDIA NIM removed entirely.
 # NVIDIA's free tier was blocked by two separate, unresolved issues: a

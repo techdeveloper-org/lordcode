@@ -83,7 +83,45 @@ class TestConfigParsing:
 
     def test_the_shipped_models_yaml_declares_the_new_providers(self):
         config = load_config()
-        assert {"groq", "ollama", "openai", "anthropic-compatible"} <= set(config.providers)
+        assert {
+            "groq",
+            "ollama",
+            "openai",
+            "anthropic-compatible",
+            "gemini",
+        } <= set(config.providers)
+
+    def test_gemini_is_declared_and_selectable_once_its_key_exists(self, monkeypatch):
+        """Adding a provider must be configuration, not a code change.
+
+        This is the assertion behind that claim: the gemini block was added to
+        models.yaml with no edit to config.py or llm_client.py, and it becomes
+        selectable the moment GEMINI_API_KEY is set -- which is exactly what
+        `api_key_required` and the per-provider budgets exist to make true.
+        """
+        config = load_config()
+        gemini = config.providers["gemini"]
+        assert gemini.api_key_env == "GEMINI_API_KEY"
+        assert gemini.api_key_required is True
+
+        client = LLMClient(config.providers)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        assert client.is_available("gemini") is False, "no key means unavailable"
+
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-a-real-credential")
+        assert client.is_available("gemini") is True
+
+    def test_gemini_points_at_the_openai_compatible_endpoint(self):
+        """The native Gemini API is not OpenAI-shaped.
+
+        `/v1beta` alone would fail on the REQUEST SHAPE rather than on the key,
+        which is the confusing failure the anthropic-compatible block documents.
+        Only `/v1beta/openai/` speaks what this client sends.
+        """
+        base_url = load_config().providers["gemini"].base_url
+        assert base_url.rstrip("/").endswith("/openai"), (
+            f"gemini must use the OpenAI-compatible path, got {base_url}"
+        )
 
     def test_ollama_needs_no_key_and_declares_no_token_ceiling(self):
         """A local runtime has no published limit, so inventing one would pace
