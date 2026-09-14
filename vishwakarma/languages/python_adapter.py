@@ -11,6 +11,9 @@ from vishwakarma.languages.base import LanguageAdapter
 _PYTEST_OUTCOME = re.compile(r"(\d+)\s+(passed|failed|error|errors|xpassed|xfailed)\b")
 """pytest's terminal summary counts, e.g. "3 passed, 1 failed in 0.12s"."""
 
+_PYTEST_FAILURES = re.compile(r"(\d+)\s+(failed|error|errors)\b")
+"""Only the bad outcomes, for the heal loop's progress signal."""
+
 
 class PythonAdapter(LanguageAdapter):
     """pytest-based adapter for Python code generation tasks."""
@@ -25,6 +28,33 @@ class PythonAdapter(LanguageAdapter):
 
     def default_file_extension(self) -> str:
         return ".py"
+
+    def failure_count(self, stdout: str, stderr: str) -> int | None:
+        """Failing tests, or a collection error while nothing can even import.
+
+        A collection error counts as 1 rather than 0: an unimportable module
+        produces no failing tests, and reporting zero would tell the heal loop
+        the attempt was perfect.
+
+        Args:
+            stdout: pytest's captured stdout.
+            stderr: pytest's captured stderr.
+
+        Returns:
+            Failed plus errored tests, else None when no summary was printed.
+        """
+        combined = f"{stdout}\n{stderr}"
+        matches = _PYTEST_FAILURES.findall(combined)
+        if matches:
+            return sum(int(count) for count, _ in matches)
+        if _PYTEST_OUTCOME.search(combined):
+            # A summary was printed and it named no failures, so this run is
+            # clean. Returning None here would report a perfect state as
+            # "cannot tell" and let the heal loop overwrite it with a worse one.
+            return 0
+        if "error" in combined.lower():
+            return 1
+        return None
 
     def executed_test_count(self, stdout: str, stderr: str) -> int | None:
         """Sum pytest's own outcome counts rather than reading its exit status.

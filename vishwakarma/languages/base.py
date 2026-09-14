@@ -48,6 +48,31 @@ class LanguageAdapter(ABC):
         """
         raise NotImplementedError
 
+    def failure_count(self, stdout: str, stderr: str) -> int | None:
+        """How broken this run is, as a number the heal loop can compare.
+
+        The loop has a bound and a success condition and nothing in between, so
+        an attempt that makes things worse is kept exactly like one that helps.
+        Measured on a Spring project, errors went 3 -> 1 -> 5 across attempts:
+        each fix was locally reasonable, the sequence was not, and the run ended
+        in a worse state than one it had already reached (#64).
+
+        A comparable magnitude is all that is needed for that -- not a precise
+        diagnosis. Only the trend matters, so an adapter may count compiler
+        errors, failing tests, or anything monotonic in brokenness, provided it
+        counts the SAME thing each time.
+
+        Args:
+            stdout: The test command's captured stdout.
+            stderr: The test command's captured stderr.
+
+        Returns:
+            A non-negative count, or None when this runner's output carries no
+            countable signal. None disables rollback for that attempt rather
+            than being read as zero.
+        """
+        return None
+
     def executed_test_count(self, stdout: str, stderr: str) -> int | None:
         """How many tests the runner reports actually EXECUTING, if it says so.
 

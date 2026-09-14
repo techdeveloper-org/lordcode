@@ -6,6 +6,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.5] - 2026-09-14
+
+### Fixed
+
+**Self-heal no longer ends worse than a state it already reached — closes #64.**
+The loop had a bound and a success condition and nothing in between: an attempt
+that increased the error count was carried forward exactly like one that reduced
+it, and the next diagnosis started from the worse state.
+
+Each fix is locally reasonable and the sequence need not be — an attempt can
+repair one file while breaking another it changed two attempts ago. Measured
+live, compile errors went `3 → 1 → 5`, the last five caused by a service being
+rewritten against a constructor an *earlier* attempt had itself changed.
+
+Language adapters now report a `failure_count`, and the loop keeps the best
+state rather than the last, rewriting it to disk so the next attempt diagnoses
+what was actually kept. Java counts **distinct** compile-error sites — Maven
+echoes every error in its own summary, so counting lines would double it — then
+falls through to surefire's failure totals once the project compiles.
+
+Measured on the project that exposed it:
+
+```
+START errors = 5
+  attempt 1                      -> 1     (best)
+  attempt 2  regressed: 11 vs 1  -> rolled back
+  attempt 3  regressed: 11 vs 1  -> rolled back
+END   errors = 1
+```
+
+Before this the same run finished at **11 errors, worse than it started**. It
+now finishes at 1. Rejected attempts are visible as `heal_attempt_regressed`
+rather than being rolled back silently.
+
+Still not green on that project; the remaining single error is a genuine defect
+the loop has not yet fixed. The guarantee added here is narrower and worth
+stating exactly: the loop can no longer go backwards.
+
 ## [1.0.4] - 2026-09-14
 
 ### Fixed
