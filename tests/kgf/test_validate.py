@@ -68,41 +68,110 @@ def test_tooltier_id_divergence_is_reported_not_hidden(graph):
     assert "TOOLTIER_ID_DIVERGENCE" in codes
 
 
-def test_markdown_is_validated_because_json_cannot_reveal_it(library, graph):
-    """Every malformed document is a VALID record in the registries.
+def _synthetic_library(tmp_path, documents):
+    """A LibrarySource over documents this test writes.
+
+    `validate_markdown` only globs `skills_dir` and `agents_dir`, so a source
+    pointed at a temporary root exercises the validator without depending on
+    the live library holding any particular defect.
+    """
+    from kgf.source import LibrarySource
+
+    root = tmp_path / "library"
+    (root / "agents").mkdir(parents=True, exist_ok=True)
+    for name, content in documents.items():
+        target = root / "skills" / name / "SKILL.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            target.write_bytes(content)
+        else:
+            target.write_text(content, encoding="utf-8")
+    return LibrarySource(root=root, library_version="synthetic")
+
+
+def test_markdown_is_validated_because_json_cannot_reveal_it(tmp_path):
+    """A malformed document can be a VALID record in the registries.
 
     That is the whole reason this half exists: a JSON-only validator reports a
-    clean library while 18 documents cannot be read at all.
+    clean library while documents cannot be read at all. Asserted against a
+    document written here -- the live library had 18 such files until they were
+    repaired at source (their #160), and resting this on them meant the repair
+    would have retired the test.
     """
-    report = validate_markdown(library)
-    assert report.failed, "expected the known malformed documents to be detected"
-
-    for label in report.failed:
-        in_registries = (
-            graph.skill(label) is not None or graph.agent(label) is not None
-        )
-        assert in_registries, f"{label} should still be present in the registries"
-
-
-def test_bom_only_files_are_recovered_not_counted_as_broken(library):
-    """13 files are merely BOM'd; utf-8-sig recovers all of them."""
-    report = validate_markdown(library)
-    assert len(report.bom_stripped) > 0
-    assert not set(report.bom_stripped) & set(report.failed), (
-        "a BOM'd file must not also be reported as malformed"
+    source = _synthetic_library(
+        tmp_path,
+        {
+            "good-core": "---\ndescription: fine\n---\n\nbody\n",
+            "broken-core": '---\ndescription: "unterminated\n---\n\nbody\n',
+        },
     )
+    report = validate_markdown(source)
+
+    assert set(report.failed) == {"broken-core"}
+    assert report.parsed == 1, "the well-formed document must still be counted"
 
 
-def test_fault_classes_distinguish_repairs_that_differ(library):
-    """The classes exist because their fixes differ.
+def test_bom_only_files_are_recovered_not_counted_as_broken(tmp_path):
+    """A BOM'd file parses under utf-8-sig and is reported, not failed.
 
-    A file with an opening quote and no closing one needs the terminator
-    added; escaping its (non-existent) interior quotes repairs nothing. An
-    earlier draft of this plan had those two diagnoses swapped.
+    Reported rather than ignored because any consumer reading plain utf-8 still
+    drops it -- which is why the library's 13 were repaired at source even
+    though kgf itself could already read them.
+    """
+    source = _synthetic_library(
+        tmp_path,
+        {
+            "bommed-core": b"\xef\xbb\xbf---\ndescription: fine\n---\n\nbody\n",
+            "plain-core": "---\ndescription: fine\n---\n\nbody\n",
+        },
+    )
+    report = validate_markdown(source)
+
+    assert report.bom_stripped == ["bommed-core"]
+    assert report.failed == {}, "a BOM alone is not a parse failure"
+    assert not set(report.bom_stripped) & set(report.failed)
+
+
+def test_the_live_library_has_no_unreadable_documents(library, at_pinned_version):
+    """The regression guard for the repair, and the only live-library claim here.
+
+    Separated from the three behavioural tests above on purpose: those own the
+    validator, this owns the data. If the library regresses, exactly one test
+    fails and it names the file.
     """
     report = validate_markdown(library)
-    faults = report.by_fault()
-    assert faults, "expected at least one fault class"
+    if at_pinned_version:
+        assert report.failed == {}, f"unreadable documents returned: {sorted(report.failed)}"
+        assert report.bom_stripped == [], f"BOM returned in: {report.bom_stripped}"
+        assert report.parsed == 1562
+    else:
+        assert report.parsed > 1500
+
+
+def test_fault_classes_distinguish_repairs_that_differ(tmp_path):
+    """The classes exist because their fixes differ, so each must be separable.
+
+    A file with an opening quote and no closing one needs the terminator added;
+    escaping its (non-existent) interior quotes repairs nothing. An earlier
+    draft of the plan had those two diagnoses swapped, and the repair that
+    actually landed proved the distinction real: `elixir-language-core` needed a
+    backslash ADDED while `jenkins-pipeline` needed one REMOVED.
+
+    Written against synthetic documents because the live library no longer has
+    any -- one of each class, so a classifier that collapses two of them fails
+    here rather than silently mis-advising a future repair.
+    """
+    source = _synthetic_library(
+        tmp_path,
+        {
+            "unquoted-core": "---\ndescription: has Keywords: a colon\n---\n\nbody\n",
+            "unterminated-core": '---\ndescription: "no closing quote\n---\n\nbody\n',
+            "interior-core": '---\ndescription: "an "interior" quote"\n---\n\nbody\n',
+            "nofrontmatter-core": "# no frontmatter at all\n\nbody\n",
+        },
+    )
+    faults = validate_markdown(source).by_fault()
+
     assert set(faults) <= {
         "unquoted-scalar",
         "unterminated-quote",
@@ -112,6 +181,8 @@ def test_fault_classes_distinguish_repairs_that_differ(library):
         "other-yaml-fault",
     }
     assert "other-yaml-fault" not in faults, "an unclassified fault means the classifier needs a case"
+    assert len(faults) >= 3, f"the classes must separate, got {faults}"
+    assert "no-frontmatter-block" in faults
 
 
 def test_classify_yaml_fault_maps_each_real_error_shape():

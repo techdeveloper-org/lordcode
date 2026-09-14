@@ -280,10 +280,12 @@ def test_the_librarys_unparseable_documents_are_counted_not_merely_survived(
         )
     ]
     if at_pinned_version:
-        assert len(broken) == 18
-        assert len(exposed) == 17, (
-            "17 agents carry a broken MANDATORY skill. The plan recorded 32 and later "
-            "15; both were wrong, and this is the measurement."
+        assert len(broken) == 0, (
+            f"the library repaired all 18 at 29.98.0; these returned: {sorted(broken)}"
+        )
+        assert len(exposed) == 0, (
+            "no agent should carry a broken mandatory skill. Before the repair this "
+            "was 17 of 528 -- the plan recorded 32 and later 15, and both were wrong."
         )
     else:
         assert len(broken) >= 0

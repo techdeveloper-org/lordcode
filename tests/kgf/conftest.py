@@ -15,8 +15,20 @@ from kgf.errors import LibraryNotFoundError
 from kgf.loader import load_graph
 from kgf.source import locate_library
 
-PINNED_LIBRARY_VERSION = "29.97.4"
-"""The library version every measured figure in this suite was derived from."""
+PINNED_LIBRARY_VERSION = "29.98.0"
+"""The library version every measured figure in this suite was derived from.
+
+Moved from 29.97.4 when the library repaired 31 unloadable documents and closed
+a five-release drift in its own VERSION file (their #160/#161).
+
+**Re-pin before re-measuring, never after.** `at_pinned_version` compares against
+this string, so while it is stale every exact-count assertion below falls to its
+`else` branch -- `null_ids >= 0`, a truthy-list check, four grant counts skipped
+outright. A stale pin therefore does not turn this suite red; it turns three
+measured assertions off and leaves it green. That is the failure this module's
+docstring exists to prevent, arriving through the mechanism meant to prevent it,
+which is why `test_the_pin_is_not_stale` now guards it.
+"""
 
 
 @pytest.fixture(scope="session")
@@ -44,6 +56,12 @@ def graph(loaded):
 def problems(loaded):
     """The ProblemLog from loading the graph."""
     return loaded[1]
+
+
+@pytest.fixture(scope="session")
+def pinned_version():
+    """The pinned version string itself, for tests that report the mismatch."""
+    return PINNED_LIBRARY_VERSION
 
 
 @pytest.fixture(scope="session")
