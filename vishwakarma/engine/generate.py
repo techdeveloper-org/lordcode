@@ -49,6 +49,31 @@ class GeneratedArtifact:
     files: list[FileSpec]
 
 
+TEST_FILE_REMINDER = (
+    "REMINDER, regardless of anything stated above: the files array in your "
+    "JSON response MUST include at least one file matching this language's "
+    "test-file convention, in addition to the implementation file(s). A "
+    "response with implementation only, no tests, is incomplete."
+)
+"""Restated as the LITERAL LAST element of the assembled system prompt (#61).
+
+engineer_prompt()'s LLM-authored "expected output format" section becomes the
+entire user-turn content the coder sees, and can describe an output shape
+that never mentions tests -- by recency, that competes with (and sometimes
+wins over) the one generic sentence at the top of this system prompt. Primacy
+alone was not enough; this restates the requirement with recency too, the
+same primacy+recency technique PROMPT_ENGINEER_SYSTEM_PROMPT itself already
+documents and applies to its own output.
+
+Appended after the persona override, not merely adjacent to
+RESPONSE_CONTRACT: persona_for_role() appends the persona's own system_prompt
+after RESPONSE_CONTRACT whenever a subagent is active, which is the common
+case for complex tasks (see orchestrator.py's knowledge.resolve() routing) --
+placing the reminder near RESPONSE_CONTRACT instead of truly last would leave
+it buried under the persona block in exactly the case with the most
+competing text to lose it in."""
+
+
 def _build_system_prompt(language: str, subagent: SubAgent | None) -> str:
     """Compose the coder's system prompt from the base contract + optional persona."""
     parts = [
@@ -60,6 +85,7 @@ def _build_system_prompt(language: str, subagent: SubAgent | None) -> str:
     coder_persona = persona_for_role(subagent, "primary_coder")
     if coder_persona is not None:
         parts.append(f"Persona override ({coder_persona.name}):\n{coder_persona.system_prompt}")
+    parts.append(TEST_FILE_REMINDER)
     return "\n\n".join(parts)
 
 
