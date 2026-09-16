@@ -85,17 +85,48 @@ providers:
     # anthropic-compatible block above documents.
     base_url: https://generativelanguage.googleapis.com/v1beta/openai/
     api_key_env: GEMINI_API_KEY
-    # UNVERIFIED, and deliberately conservative. Gemini publishes its ceilings
-    # PER MODEL and per tier while this config is per provider, so these are a
-    # floor chosen to be safe across the flash/pro models a role is likely to
-    # name, not a quoted limit. The free tier's request ceiling is the tight
-    # one -- single-digit RPM on some models -- so rpm_budget is set low on
-    # purpose; raise both once the account's real tier is known.
+    # Deliberately conservative. Gemini publishes its ceilings PER MODEL and
+    # per tier while this config is per provider, so these are a floor chosen
+    # to be safe across the flash/pro models a role is likely to name, not a
+    # quoted limit. The free tier's request ceiling is the tight one --
+    # single-digit RPM on some models -- so rpm_budget is set low on purpose;
+    # raise both once the account's real tier is known.
     #
-    # No key is present in this environment yet, so nothing here has been
-    # live-tested. Read the warning above about NVIDIA NIM and Cerebras: this
-    # file's own history is two providers whose advertised free tiers were not
-    # actually entitled to this account.
+    # Wired into primary_coder and reasoner (#72) as the middle fallback,
+    # between Groq and ollama-colab -- see those roles below. This budget is
+    # what a Groq-exhausted session is pinned to for the REST of that
+    # session: a plain rate limit does not advance the router past gemini
+    # (RateLimitExhaustedError is deliberately not an openai.APIError
+    # subclass, so calling.py re-raises it without calling
+    # handle_unavailable -- the same protection Groq itself relies on, see
+    # llm_client.py's RATE_LIMIT_WALL_CLOCK_SECONDS docstring). A gemini call
+    # that can't be admitted within that wall-clock window hard-fails to the
+    # caller; it does NOT fall through to ollama-colab's looser rpm_budget:
+    # 120 / no token cap. This is intentional, not a bug to "fix" into a
+    # fallthrough. Self-heal retries (max_heal_attempts: 3) share this same
+    # budget with interactive calls once pinned.
+    #
+    # GEMINI_API_KEY is the first credential in either role's chain that can
+    # actually incur real charges (Groq needs no card; ollama-colab is
+    # keyless/local) -- set a billing/quota cap on the Google Cloud project
+    # backing it before relying on this fallback under load.
+    #
+    # Live-tested from this account (#72): a direct chat-completion call
+    # against gemini-3.6-flash returned a real response ("WORKING"). Model
+    # choice has a history worth recording -- gemini-2.5-pro (the originally
+    # requested pin) is retired for new users (404, Google's own error
+    # message points at gemini-3.1-pro-preview); gemini-3.1-pro-preview
+    # resolves but its RateLimitError body is explicit and conclusive:
+    # "generativelanguage.googleapis.com/generate_content_free_tier_requests,
+    # limit: 0, model: gemini-3.1-pro" -- the free tier's quota for this
+    # model is not tight, it is zero, confirmed from an account with a paid
+    # Google Pro subscription (an AI Studio key's quota tracks whether its
+    # backing Cloud project has billing enabled, not a separate consumer
+    # subscription -- Pro does not raise this key's limit by itself);
+    # gemini-2.5-flash is also retired (404, points at gemini-3.6-flash);
+    # gemini-3.6-flash is the first candidate that actually resolved with a
+    # real free-tier quota. Read the warning above about NVIDIA NIM and
+    # Cerebras: gemini is not one of them, confirmed working.
     rpm_budget: 10
     tpm_budget: 250000
 
@@ -201,7 +232,10 @@ roles:
     # correct code on a live test call.
     - {provider: groq, model: openai/gpt-oss-120b}
     - {provider: groq, model: openai/gpt-oss-20b}
-    # Last-resort fallback once both Groq candidates are exhausted -- see the
+    # Mid-chain fallback once both Groq candidates are exhausted (#72) -- see
+    # the gemini provider block above for the rate-limit-pinning tradeoff.
+    - {provider: gemini, model: gemini-3.6-flash}
+    # Last-resort fallback once gemini is also exhausted -- see the
     # ollama-colab provider block above for the tunnel/env-var setup.
     # Live-tested from this account (#71): a direct /api/generate call
     # against the Colab-hosted instance returned a real completion. Chosen
@@ -228,6 +262,8 @@ roles:
     # reasoning pass.
     - {provider: groq, model: qwen/qwen3.6-27b}
     - {provider: groq, model: openai/gpt-oss-120b}
+    # Mid-chain fallback -- see primary_coder's gemini entry above.
+    - {provider: gemini, model: gemini-3.6-flash}
     # Last-resort fallback -- see primary_coder's ollama-colab entry above
     # for why deepseek-coder-v2:16b was chosen and live-verified over
     # deepseek-v4-pro.

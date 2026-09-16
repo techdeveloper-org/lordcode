@@ -58,19 +58,18 @@ Vishwakarma falls to the role's next candidate automatically, and only
 fails with a clear `ConfigError` (naming the role and how to fix
 `models.yaml`) if every candidate for that role is gone.
 
-**Other providers.** `models.yaml` also defines `ollama`, `openai`, `gemini` and
-an `anthropic-compatible` block. None is wired to a role, so they cost nothing at
+**Other providers.** `models.yaml` also defines `ollama`, `openai` and an
+`anthropic-compatible` block. None is wired to a role, so they cost nothing at
 startup -- the router only walks providers a role actually names -- and pointing
 a role at one is a config edit rather than a code change.
 
-Two of them need their base URL read carefully, because getting it wrong fails on
+One of them needs its base URL read carefully, because getting it wrong fails on
 the *request shape* rather than on the key, which is a confusing way to fail.
-`gemini` points at `/v1beta/openai/` -- Google's OpenAI-compatible layer, not its
-native `/v1beta` API -- and `anthropic-compatible` points at a local proxy rather
-than at `api.anthropic.com` directly.
+`anthropic-compatible` points at a local proxy rather than at
+`api.anthropic.com` directly.
 
-Neither `gemini`, `openai` nor `anthropic-compatible` has been live-tested from
-this account. That caveat is not boilerplate: this configuration's own history is
+Neither `openai` nor `anthropic-compatible` has been live-tested from this
+account. That caveat is not boilerplate: this configuration's own history is
 two providers (NVIDIA NIM, Cerebras) whose advertised free tiers turned out not to
 be entitled.
 
@@ -81,10 +80,40 @@ just configuration" was false for exactly the provider that runs without spend.
 A keyless provider omits `api_key_env` entirely rather than naming a variable
 that means nothing.
 
-None of the three has been live-tested from this account, and that matters here:
+Neither has been live-tested from this account, and that matters here:
 this repo's history records two providers whose advertised free tiers turned out
 not to be entitled (NVIDIA NIM and Cerebras, both documented in `models.yaml`).
 Treat them as correct starting points, not as verified access.
+
+**Gemini fallback.** `gemini` is wired as the mid-chain fallback on
+`primary_coder` and `reasoner` -- Groq first, then `gemini`, then
+`ollama-colab` last -- deliberately not on `router_fast` for the same reason
+`ollama-colab` isn't (see above), and because its own `rpm_budget: 10` free-tier
+ceiling is too tight for a frequent classification role regardless. It points
+at `/v1beta/openai/` -- Google's OpenAI-compatible layer, not its native
+`/v1beta` API, which fails on the *request shape* rather than the key if you
+get it wrong. `gemini-3.6-flash` is the pinned model, live-tested from this
+account (#72) and confirmed working -- it wasn't the first choice tried:
+`gemini-2.5-pro` and `gemini-2.5-flash` are both retired for new users (404,
+pointing at their `3.x` successors), and `gemini-3.1-pro-preview` resolves
+but its error body is explicit: free-tier quota for that model is `limit: 0`,
+not merely tight -- confirmed from an account with a paid Google Pro
+subscription (an AI Studio key's quota tracks whether its backing Cloud
+project has billing enabled, not a separate consumer subscription).
+`gemini-3.6-flash` was the first candidate that actually
+returned a response.
+
+One tradeoff worth knowing before relying on it under load: once Groq is
+exhausted for a session, the router stays pinned on `gemini` for the rest of
+that session -- a plain rate limit does not advance past it (the same
+protection that already exists for Groq, see `models.yaml`'s `gemini` block),
+so `gemini`'s tight `rpm_budget: 10` is shared across every subsequent
+interactive and self-heal call rather than falling through to
+`ollama-colab`'s looser `rpm_budget: 120`. A gemini call that can't be
+admitted in time hard-fails to the caller instead of silently degrading to
+the local GPU. And because `GEMINI_API_KEY` is a real Google Cloud credential
+(unlike Groq's no-card tier or `ollama-colab`'s keyless local GPU), set a
+billing/quota cap on the project backing it before leaning on this fallback.
 
 **Colab-hosted Ollama fallback.** `ollama-colab` is wired as the last
 candidate on `primary_coder` and `reasoner` -- deliberately not on

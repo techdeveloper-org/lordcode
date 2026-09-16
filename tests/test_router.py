@@ -291,29 +291,35 @@ class TestStartupSurvivesAProviderItCannotVerify:
         assert "no API key" in str(excinfo.value)
 
 
-def test_startup_falls_through_to_the_colab_ollama_fallback_when_groq_is_exhausted():
-    """#71. Groq's two candidates are both unusable, so validate_startup must
-    walk past them to the ollama-colab last resort, the same fall-through
-    mechanism test_validate_startup_falls_across_providers_when_first_candidate_missing
+def test_startup_falls_through_to_the_colab_ollama_fallback_when_groq_and_gemini_are_exhausted():
+    """#71, extended by #72. Groq's two candidates AND gemini are all
+    unusable, so validate_startup must walk all the way past them to the
+    ollama-colab last resort -- the same fall-through mechanism
+    test_validate_startup_falls_across_providers_when_first_candidate_missing
     already covers for two normal providers -- this is that same mechanism
-    exercised against the real shape ollama-colab is wired with in models.yaml
-    (a keyless, last-position candidate on primary_coder and reasoner).
+    exercised against the real 3-deep shape primary_coder/reasoner are wired
+    with in models.yaml (groq x2, then gemini, then a keyless ollama-colab
+    last position).
 
     This is startup candidate RESOLUTION only, via FakeClient's is_available/
     list_model_ids -- it does not exercise calling.call_role's own runtime
-    fallback (which retries mid-generation on a live chat_completion failure),
-    a separate code path this test file does not otherwise cover either.
+    fallback (which retries mid-generation on a live chat_completion failure,
+    including the RateLimitExhaustedError handling that keeps gemini pinned
+    rather than falling through on a 429), a separate code path this test
+    file does not otherwise cover for any provider.
     """
     models = _models(
         {
             "primary_coder": [
                 RoleCandidate(provider="groq", model="coder-a"),
                 RoleCandidate(provider="groq", model="coder-b"),
+                RoleCandidate(provider="gemini", model="gemini-3.6-flash"),
                 RoleCandidate(provider="ollama-colab", model="deepseek-coder-v2:16b"),
             ],
             "router_fast": [RoleCandidate(provider="groq", model="fast-a")],
             "reasoner": [
                 RoleCandidate(provider="groq", model="reasoner-a"),
+                RoleCandidate(provider="gemini", model="gemini-3.6-flash"),
                 RoleCandidate(provider="ollama-colab", model="deepseek-coder-v2:16b"),
             ],
             "fallback_long_context": [RoleCandidate(provider="groq", model="fallback-a")],
@@ -335,4 +341,59 @@ def test_startup_falls_through_to_the_colab_ollama_fallback_when_groq_is_exhaust
     )
     assert router.resolve("reasoner") == RoleCandidate(
         provider="ollama-colab", model="deepseek-coder-v2:16b"
+    )
+
+
+def test_startup_resolves_to_gemini_when_groqs_candidates_are_withdrawn_but_gemini_is_up():
+    """#72. Proves gemini's middle position actually gets selected -- the
+    total-cascade test above only proves the chain reaches ollama-colab when
+    EVERYTHING is unusable, it never exercises gemini succeeding. Without
+    this test, an accidental models.yaml ordering mistake (e.g. ollama-colab
+    listed before gemini) would still pass every other test in this file.
+
+    groq's own coder-a/coder-b/reasoner-a models are withdrawn from its live
+    catalog (mirroring test_startup_falls_through_to_the_colab_ollama_fallback_
+    when_groq_and_gemini_are_exhausted's technique) rather than groq being
+    entirely unavailable, so router_fast/fallback_long_context -- whose
+    models ARE in groq's catalog -- keep resolving via groq unaffected.
+    """
+    models = _models(
+        {
+            "primary_coder": [
+                RoleCandidate(provider="groq", model="coder-a"),
+                RoleCandidate(provider="groq", model="coder-b"),
+                RoleCandidate(provider="gemini", model="gemini-3.6-flash"),
+                RoleCandidate(provider="ollama-colab", model="deepseek-coder-v2:16b"),
+            ],
+            "router_fast": [RoleCandidate(provider="groq", model="fast-a")],
+            "reasoner": [
+                RoleCandidate(provider="groq", model="reasoner-a"),
+                RoleCandidate(provider="gemini", model="gemini-3.6-flash"),
+                RoleCandidate(provider="ollama-colab", model="deepseek-coder-v2:16b"),
+            ],
+            "fallback_long_context": [RoleCandidate(provider="groq", model="fallback-a")],
+        }
+    )
+    client = FakeClient(
+        available_providers={"groq", "gemini", "ollama-colab"},
+        live_ids_by_provider={
+            # groq is available (has a key), but coder-a/coder-b/reasoner-a
+            # are not in its live catalog -- distinct from groq being
+            # entirely down, and enough to make primary_coder/reasoner skip
+            # past their groq candidates while router_fast/fallback_long_context
+            # (whose models ARE in the catalog) still resolve via groq.
+            "groq": {"fast-a", "fallback-a"},
+            "gemini": {"gemini-3.6-flash"},
+            "ollama-colab": {"deepseek-coder-v2:16b"},
+        },
+    )
+    router = Router(models, client)
+
+    router.validate_startup()
+
+    assert router.resolve("primary_coder") == RoleCandidate(
+        provider="gemini", model="gemini-3.6-flash"
+    )
+    assert router.resolve("reasoner") == RoleCandidate(
+        provider="gemini", model="gemini-3.6-flash"
     )

@@ -143,9 +143,10 @@ class TestConfigParsing:
         """validate_startup only walks providers a role names, so declaring one
         costs nothing -- and pointing a role at it is then a config edit.
 
-        ollama-colab is the one declared provider that IS wired (into
-        primary_coder and reasoner only -- see test_router.py for the
-        fallback-resolution coverage), so it is excluded from this set.
+        gemini and ollama-colab are the two declared providers that ARE
+        wired (into primary_coder and reasoner only -- see test_router.py
+        for the fallback-resolution coverage), so they are excluded from
+        this set. openai and anthropic-compatible remain genuinely unused.
         """
         config = load_config()
         named = {
@@ -153,7 +154,7 @@ class TestConfigParsing:
             for candidates in config.models.roles.values()
             for candidate in candidates
         }
-        assert named == {"groq", "ollama-colab"}
+        assert named == {"groq", "gemini", "ollama-colab"}
 
     def test_a_keyed_provider_missing_api_key_env_is_a_config_error(self):
         from vishwakarma.config import _parse_providers
