@@ -68,6 +68,29 @@ stays silent: httpx.ReadTimeout at 4.6s against a 4s configured read timeout. So
 a server that accepts and sends nothing is killed here, by the transport, and
 only the "alive but crawling" case needs the throughput bound."""
 
+TOTAL_RESPONSE_TIMEOUT_BASE_SECONDS = 60.0
+TOTAL_RESPONSE_TIMEOUT_SECONDS_PER_TOKEN = 0.15
+"""Together, bound TOTAL streamed response time -- the throughput floor #56
+itself identifies as still missing after REQUEST_TIMEOUT_SECONDS above: a
+provider that emits small chunks steadily, each well inside the 30s inter-chunk
+gap, never trips that timeout and never raises, so the router never fails over
+and an interactive caller waits indefinitely. #56 found this while evaluating a
+1-3B local Ollama model swapping on constrained hardware -- alive, streaming,
+unusably slow -- but it is not local-only: a remote provider under severe load,
+or a proxy trickling bytes to hold a connection open, produces the same shape.
+
+The ceiling scales with the call's own max_tokens (already available in
+chat_completion's kwargs at every call site in this codebase, so no role needs
+threading through separately) because a role's legitimate call duration varies
+enormously with its completion budget: router_fast asks for 60 tokens,
+primary_coder asks for up to 8000. GENEROUS AND UNVERIFIED -- these two numbers
+are a conservative starting estimate, not a measured throughput floor (#56's
+own text asks for exactly that measurement before landing option 2, the
+minimum-throughput-floor refinement). ceiling = BASE + max_tokens * PER_TOKEN,
+e.g. ~69s for router_fast (60 tokens), ~1260s (21min) for primary_coder (8000
+tokens) -- bounded instead of the current unbounded hang, not yet tuned against
+real observed throughput. Revisit both constants once real numbers exist."""
+
 
 class ProviderUnavailableError(Exception):
     """Raised when a provider's (or a candidate's override) API key env var is not set."""
@@ -102,6 +125,35 @@ class EmptyResponseError(Exception):
         self.provider = provider
         self.model = model
         super().__init__(f"Model '{model}' on provider '{provider}' returned an empty/malformed response")
+
+
+class ResponseStalledError(Exception):
+    """Raised when a stream's TOTAL elapsed time exceeds its computed ceiling.
+
+    Distinct from httpx's own read timeout (REQUEST_TIMEOUT_SECONDS above),
+    which only bounds the gap BETWEEN chunks -- this bounds the whole call, for
+    the "alive but crawling" case #56 describes, where chunks keep arriving
+    just often enough that the inter-chunk timeout never fires. Treated as a
+    candidate-level failure like EmptyResponseError/ModelUnavailableError (the
+    router advances to the role's next candidate), but a stall means the
+    candidate is UP, merely slow right now -- calling.py deliberately marks
+    this transient (saw_transient=True) rather than joining the same permanent-
+    demotion bucket as a genuinely withdrawn model, so a role recovers via
+    restore_active_index if every candidate happens to stall in one session
+    rather than getting ConfigError'd for the rest of the process.
+    """
+
+    def __init__(self, provider: str, model: str, elapsed_seconds: float, ceiling_seconds: float):
+        self.provider = provider
+        self.model = model
+        self.elapsed_seconds = elapsed_seconds
+        self.ceiling_seconds = ceiling_seconds
+        super().__init__(
+            f"Provider '{provider}' model '{model}' has been streaming for "
+            f"{elapsed_seconds:.0f}s, past its {ceiling_seconds:.0f}s ceiling -- "
+            f"the connection is alive but too slow to be usable; advancing to "
+            f"the next candidate."
+        )
 
 
 class RateLimitExhaustedError(Exception):
@@ -306,6 +358,10 @@ class LLMClient:
                 separate access approval -- NVIDIA's catalog does this for
                 some entries), on this provider.
             EmptyResponseError: If the stream ends with no content at all.
+            ResponseStalledError: If the stream's TOTAL elapsed time exceeds
+                its max_tokens-derived ceiling -- the connection is alive and
+                producing chunks (so REQUEST_TIMEOUT_SECONDS never fires) but
+                too slowly to be usable.
             RateLimitExhaustedError: If the provider kept returning 429 for
                 RATE_LIMIT_WALL_CLOCK_SECONDS. Distinct from the errors above
                 because it says nothing about this model's health -- the key's
@@ -317,6 +373,9 @@ class LLMClient:
         env_name = self._resolve_api_key_env(provider, api_key_env)
         limiter = self._get_limiter(provider, env_name)
         estimated_tokens = estimate_call_tokens(messages, kwargs.get("max_tokens"))
+        total_response_ceiling = TOTAL_RESPONSE_TIMEOUT_BASE_SECONDS + (
+            (kwargs.get("max_tokens") or 0) * TOTAL_RESPONSE_TIMEOUT_SECONDS_PER_TOKEN
+        )
 
         rate_limit_started: float | None = None
         rate_limit_attempts = 0
@@ -330,7 +389,12 @@ class LLMClient:
                     model=model, messages=messages, stream=True, **kwargs
                 )
                 pieces: list[str] = []
+                stream_started = time.monotonic()
                 for chunk in stream:
+                    if time.monotonic() - stream_started > total_response_ceiling:
+                        raise ResponseStalledError(
+                            provider, model, time.monotonic() - stream_started, total_response_ceiling
+                        )
                     if not chunk.choices:
                         continue
                     piece = chunk.choices[0].delta.content

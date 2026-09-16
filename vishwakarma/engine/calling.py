@@ -20,6 +20,7 @@ from vishwakarma.llm_client import (
     ModelUnavailableError,
     ProviderUnavailableError,
     RateLimitExhaustedError,
+    ResponseStalledError,
 )
 from vishwakarma.router import ChainExhaustedError, ProviderTroubleError, Router
 
@@ -162,6 +163,7 @@ def call_role(
             ModelUnavailableError,
             ProviderUnavailableError,
             EmptyResponseError,
+            ResponseStalledError,
             openai.APIError,
         ) as exc:
             # openai.APIError (InternalServerError, APITimeoutError, and other
@@ -179,11 +181,17 @@ def call_role(
                 candidate.model,
                 exc,
             )
-            if isinstance(exc, openai.APIError) and not isinstance(exc, ModelUnavailableError):
-                # The provider answered badly rather than the model being gone.
-                # Recorded so that if this walk exhausts the chain, the index can
-                # be handed back instead of the role being demoted for the rest
-                # of the session over a blip.
+            if isinstance(exc, ResponseStalledError) or (
+                isinstance(exc, openai.APIError) and not isinstance(exc, ModelUnavailableError)
+            ):
+                # A stall means the candidate is UP, merely too slow right
+                # now (#56) -- the same "the provider had a bad thirty
+                # seconds" case openai.APIError already gets this treatment
+                # for, and unlike ModelUnavailableError it says nothing about
+                # the model being withdrawn. Recorded so that if this walk
+                # exhausts the chain, the index can be handed back instead of
+                # the role being demoted for the rest of the session over a
+                # transient blip.
                 saw_transient = True
             try:
                 router.handle_unavailable(role, candidate)
