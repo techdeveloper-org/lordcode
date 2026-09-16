@@ -99,6 +99,44 @@ providers:
     rpm_budget: 10
     tpm_budget: 250000
 
+  xkiro:
+    # OpenAI-compatible, 11 models, all documented as $0 in / $0 out, using
+    # vendor/model naming (e.g. mistralai/devstral-medium). #40 records the
+    # full catalog and a recommended role->model mapping; nothing below wires
+    # a role, matching this file's own "gemini decision" precedent -- the key
+    # is not in .env yet, and a role pointing at an unreachable provider fails
+    # at startup rather than degrading gracefully.
+    base_url: https://api.xkiro.com/v1
+    api_key_env: XKIRO_API_KEY
+    # UNVERIFIED, and deliberately conservative -- rpm_budget is a required
+    # field (config.py raises ConfigError without one), so this is a
+    # syntactically-necessary placeholder, not a quoted limit. #40 states
+    # xkiro's actual rate ceilings are unknown and explicitly must not be
+    # invented -- a stronger uncertainty than gemini's case above, where
+    # Google at least publishes per-model ceilings to floor a guess against.
+    # tpm_budget is deliberately OMITTED rather than given a placeholder
+    # number, the same way the ollama block above omits it: config.py's own
+    # docstring prefers disabling token accounting over inventing a ceiling
+    # when no real one is known. Read the warning on the gemini block just
+    # above: this file's history is two providers (NVIDIA NIM, Cerebras)
+    # whose advertised free tiers were not actually entitled to this account
+    # -- treat this block the same way, a starting point, not verified access.
+    rpm_budget: 10
+    #
+    # Recommended role -> model mapping from #40 (record only -- flip a role
+    # to one of these as a one-line edit once XKIRO_API_KEY lands and a live
+    # chat-completion smoke test confirms real access):
+    #   router_fast          -> mistralai/ministral-8b     (fallback: mistralai/ministral-3b)
+    #   reasoner              -> mistralai/mistral-large-2512 (fallback: mistralai/mistral-small-2603)
+    #   primary_coder         -> mistralai/devstral-medium   (fallback: mistralai/mistral-medium-3.5)
+    #   fallback_long_context -> sensenova/sensenova-6.8-flash-lite (fallback: mistralai/mistral-medium-3.5)
+    # Small-output roles (router_fast) MUST use a non-reasoning model:
+    # calling.py's _light_reasoning_effort_for only recognizes qwen/* and
+    # openai/gpt-oss* prefixes, so an xkiro reasoning-capable model would
+    # never receive reasoning_effort and could burn its whole completion
+    # budget on an uncapped <think> trace -- every model picked above is
+    # explicitly documented as non-reasoning for exactly this reason.
+
 # Switched fully to Groq (2026-09-11) -- NVIDIA NIM removed entirely.
 # NVIDIA's free tier was blocked by two separate, unresolved issues: a
 # platform-level 403 "Authorization failed" bug on Personal-org accounts,
