@@ -86,6 +86,24 @@ this repo's history records two providers whose advertised free tiers turned out
 not to be entitled (NVIDIA NIM and Cerebras, both documented in `models.yaml`).
 Treat them as correct starting points, not as verified access.
 
+**Colab-hosted Ollama fallback.** `ollama-colab` is wired as the last
+candidate on `primary_coder` and `reasoner` -- deliberately not on
+`router_fast`, because that role's small `max_tokens` budget is exactly where
+an unrecognized reasoning-capable model burns its completion on an uncapped
+`<think>` trace instead of answering (see `models.yaml`'s `xkiro` block for
+the same precedent). It runs Ollama on Colab's free GPU, reached over a
+`cloudflared` quick tunnel rather than local `127.0.0.1` (see `colab/
+ollama_colab_server.ipynb` for the setup). The tunnel's public URL is
+session-scoped -- a Colab session disconnects after ~12h or on idle, and a
+fresh one gets a new URL -- so it is read from `OLLAMA_COLAB_BASE_URL` (set in
+`.env`, already gitignored) rather than written into the git-tracked
+`models.yaml`; update that variable after every Colab restart. A stale or
+unset URL is not a startup failure -- `router.validate_startup` treats an
+unreachable candidate as an ordinary skip, same as any other candidate whose
+provider is down, and falls through to the next one. The pinned model tag has
+not been live-tested from this account; treat it the same as the other
+unverified providers above.
+
 **Why Groq, not NVIDIA**: this project originally ran on NVIDIA's free NIM
 API, but hit two unresolved platform-side issues there: a `403
 "Authorization failed"` bug on Personal-org accounts (listing models worked,

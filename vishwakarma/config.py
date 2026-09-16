@@ -46,6 +46,14 @@ class ProviderConfig:
     without spend. When it is False, api_key_env may be omitted: naming an
     environment variable for a credential that does not exist is worse than
     leaving it out, because it implies the variable means something.
+
+    base_url_env optionally names an environment variable whose value
+    overrides the yaml-literal base_url when present and non-empty. This
+    exists for a provider whose real address is session-scoped and must not
+    be committed -- a Colab-hosted tunnel URL, say -- so the tracked yaml
+    holds an inert placeholder while the actual address lives in .env
+    (already gitignored), the same way api_key_env keeps credentials out of
+    models.yaml. When the named variable is unset, base_url is used as-is.
     """
 
     name: str
@@ -54,6 +62,7 @@ class ProviderConfig:
     api_key_env: str = ""
     tpm_budget: int | None = None
     api_key_required: bool = True
+    base_url_env: str = ""
 
 
 @dataclass(frozen=True)
@@ -109,13 +118,16 @@ def _parse_providers(raw: dict) -> dict[str, ProviderConfig]:
             )
 
         tpm_raw = spec.get("tpm_budget")
+        base_url_env = spec.get("base_url_env", "")
+        base_url = os.environ.get(base_url_env) or spec["base_url"] if base_url_env else spec["base_url"]
         providers[name] = ProviderConfig(
             name=name,
-            base_url=spec["base_url"],
+            base_url=base_url,
             api_key_env=spec.get("api_key_env", ""),
             rpm_budget=int(spec["rpm_budget"]),
             api_key_required=key_required,
             tpm_budget=int(tpm_raw) if tpm_raw is not None else None,
+            base_url_env=base_url_env,
         )
     return providers
 

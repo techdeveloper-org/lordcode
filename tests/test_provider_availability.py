@@ -131,16 +131,29 @@ class TestConfigParsing:
         assert ollama.api_key_env == ""
         assert ollama.tpm_budget is None
 
+    def test_ollama_colab_needs_no_key_and_declares_no_token_ceiling(self):
+        """Same reasoning as local ollama: a free Colab GPU session has no
+        published limit and no billing."""
+        ollama_colab = load_config().providers["ollama-colab"]
+        assert ollama_colab.api_key_required is False
+        assert ollama_colab.api_key_env == ""
+        assert ollama_colab.tpm_budget is None
+
     def test_the_new_providers_are_defined_but_unused(self):
         """validate_startup only walks providers a role names, so declaring one
-        costs nothing -- and pointing a role at it is then a config edit."""
+        costs nothing -- and pointing a role at it is then a config edit.
+
+        ollama-colab is the one declared provider that IS wired (into
+        primary_coder and reasoner only -- see test_router.py for the
+        fallback-resolution coverage), so it is excluded from this set.
+        """
         config = load_config()
         named = {
             candidate.provider
             for candidates in config.models.roles.values()
             for candidate in candidates
         }
-        assert named == {"groq"}
+        assert named == {"groq", "ollama-colab"}
 
     def test_a_keyed_provider_missing_api_key_env_is_a_config_error(self):
         from vishwakarma.config import _parse_providers
@@ -160,6 +173,44 @@ class TestConfigParsing:
 
         with pytest.raises(ConfigError, match="base_url"):
             _parse_providers({"providers": {"p": {"rpm_budget": 1, "api_key_required": False}}})
+
+    def test_base_url_env_overrides_the_literal_when_set(self, monkeypatch):
+        """The mechanism ollama-colab uses to keep a session-scoped tunnel URL
+        out of git-tracked models.yaml."""
+        from vishwakarma.config import _parse_providers
+
+        monkeypatch.setenv("SOME_TUNNEL_URL", "https://real-tunnel.example/v1")
+        providers = _parse_providers(
+            {
+                "providers": {
+                    "p": {
+                        "base_url": "https://placeholder.invalid/v1",
+                        "base_url_env": "SOME_TUNNEL_URL",
+                        "rpm_budget": 1,
+                        "api_key_required": False,
+                    }
+                }
+            }
+        )
+        assert providers["p"].base_url == "https://real-tunnel.example/v1"
+
+    def test_base_url_env_falls_back_to_the_literal_when_unset(self, monkeypatch):
+        from vishwakarma.config import _parse_providers
+
+        monkeypatch.delenv("SOME_TUNNEL_URL", raising=False)
+        providers = _parse_providers(
+            {
+                "providers": {
+                    "p": {
+                        "base_url": "https://placeholder.invalid/v1",
+                        "base_url_env": "SOME_TUNNEL_URL",
+                        "rpm_budget": 1,
+                        "api_key_required": False,
+                    }
+                }
+            }
+        )
+        assert providers["p"].base_url == "https://placeholder.invalid/v1"
 
 
 class TestStartupIsUnaffected:

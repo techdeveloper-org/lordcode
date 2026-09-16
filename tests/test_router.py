@@ -289,3 +289,50 @@ class TestStartupSurvivesAProviderItCannotVerify:
             Router(models, client).validate_startup()
         assert "absent/m" in str(excinfo.value)
         assert "no API key" in str(excinfo.value)
+
+
+def test_startup_falls_through_to_the_colab_ollama_fallback_when_groq_is_exhausted():
+    """#71. Groq's two candidates are both unusable, so validate_startup must
+    walk past them to the ollama-colab last resort, the same fall-through
+    mechanism test_validate_startup_falls_across_providers_when_first_candidate_missing
+    already covers for two normal providers -- this is that same mechanism
+    exercised against the real shape ollama-colab is wired with in models.yaml
+    (a keyless, last-position candidate on primary_coder and reasoner).
+
+    This is startup candidate RESOLUTION only, via FakeClient's is_available/
+    list_model_ids -- it does not exercise calling.call_role's own runtime
+    fallback (which retries mid-generation on a live chat_completion failure),
+    a separate code path this test file does not otherwise cover either.
+    """
+    models = _models(
+        {
+            "primary_coder": [
+                RoleCandidate(provider="groq", model="coder-a"),
+                RoleCandidate(provider="groq", model="coder-b"),
+                RoleCandidate(provider="ollama-colab", model="deepseek-v4-pro"),
+            ],
+            "router_fast": [RoleCandidate(provider="groq", model="fast-a")],
+            "reasoner": [
+                RoleCandidate(provider="groq", model="reasoner-a"),
+                RoleCandidate(provider="ollama-colab", model="deepseek-v4-pro"),
+            ],
+            "fallback_long_context": [RoleCandidate(provider="groq", model="fallback-a")],
+        }
+    )
+    client = FakeClient(
+        available_providers={"groq", "ollama-colab"},
+        live_ids_by_provider={
+            "groq": {"fast-a", "fallback-a"},
+            "ollama-colab": {"deepseek-v4-pro"},
+        },
+    )
+    router = Router(models, client)
+
+    router.validate_startup()
+
+    assert router.resolve("primary_coder") == RoleCandidate(
+        provider="ollama-colab", model="deepseek-v4-pro"
+    )
+    assert router.resolve("reasoner") == RoleCandidate(
+        provider="ollama-colab", model="deepseek-v4-pro"
+    )
