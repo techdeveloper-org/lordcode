@@ -48,7 +48,7 @@ _LIGHT_REASONING_EFFORT_BY_MODEL_PREFIX = (
     ("qwen/", "none"),
     ("openai/gpt-oss", "low"),
 )
-# ollama-colab's deepseek-v4-pro (models.yaml) matches neither prefix, so a
+# ollama-colab's deepseek-coder-v2:16b (models.yaml) matches neither prefix, so a
 # router_fast call landing on it would silently skip reasoning_effort -- this
 # is exactly why router_fast has no ollama-colab candidate: primary_coder and
 # reasoner have large enough max_tokens budgets that a missed light-reasoning

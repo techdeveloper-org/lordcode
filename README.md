@@ -91,18 +91,30 @@ candidate on `primary_coder` and `reasoner` -- deliberately not on
 `router_fast`, because that role's small `max_tokens` budget is exactly where
 an unrecognized reasoning-capable model burns its completion on an uncapped
 `<think>` trace instead of answering (see `models.yaml`'s `xkiro` block for
-the same precedent). It runs Ollama on Colab's free GPU, reached over a
-`cloudflared` quick tunnel rather than local `127.0.0.1` (see `colab/
-ollama_colab_server.ipynb` for the setup). The tunnel's public URL is
-session-scoped -- a Colab session disconnects after ~12h or on idle, and a
-fresh one gets a new URL -- so it is read from `OLLAMA_COLAB_BASE_URL` (set in
-`.env`, already gitignored) rather than written into the git-tracked
-`models.yaml`; update that variable after every Colab restart. A stale or
-unset URL is not a startup failure -- `router.validate_startup` treats an
-unreachable candidate as an ordinary skip, same as any other candidate whose
-provider is down, and falls through to the next one. The pinned model tag has
-not been live-tested from this account; treat it the same as the other
-unverified providers above.
+the same precedent). It runs Ollama on Colab's free GPU, reached over an
+`ngrok` tunnel rather than local `127.0.0.1` (see `colab/
+ollama_colab_server.ipynb` for the setup). ngrok, not a `cloudflared` quick
+tunnel -- `trycloudflare.com` was tried first and consistently returned `403
+Forbidden` straight from Cloudflare's edge, reproduced across 3 fresh
+tunnels and two protocols; live-verified working instead with ngrok. One
+catch, also live-verified: Ollama has its own server-side Host-header check
+(unrelated to `OLLAMA_ORIGINS`, which only governs browser CORS), so
+`ngrok.connect()` must pass `host_header="localhost:11434"` or Ollama 403s
+the tunnel's own public hostname. The tunnel's public URL is session-scoped
+-- a Colab session disconnects after ~12h or on idle (and has been observed
+to silently reset the whole backend, wiping the installed binary and pulled
+models, while the notebook UI still shows "Connected") -- so it is read from
+`OLLAMA_COLAB_BASE_URL` (set in `.env`, already gitignored) rather than
+written into the git-tracked `models.yaml`; update that variable after every
+Colab restart. A stale or unset URL is not a startup failure --
+`router.validate_startup` treats an unreachable candidate as an ordinary
+skip, same as any other candidate whose provider is down, and falls through
+to the next one. `deepseek-coder-v2:16b` was chosen over the originally
+requested `deepseek-v4-pro`, which turned out to resolve to Ollama's
+*cloud*-hosted tier (`401 Unauthorized` without a separate `ollama.com`
+sign-in) rather than a model that runs on this GPU; both
+`deepseek-coder-v2:16b` and the `qwen2.5-coder:7b` fallback have been
+live-tested end-to-end through the tunnel from this account.
 
 **Why Groq, not NVIDIA**: this project originally ran on NVIDIA's free NIM
 API, but hit two unresolved platform-side issues there: a `403

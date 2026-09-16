@@ -309,12 +309,12 @@ def test_startup_falls_through_to_the_colab_ollama_fallback_when_groq_is_exhaust
             "primary_coder": [
                 RoleCandidate(provider="groq", model="coder-a"),
                 RoleCandidate(provider="groq", model="coder-b"),
-                RoleCandidate(provider="ollama-colab", model="deepseek-v4-pro"),
+                RoleCandidate(provider="ollama-colab", model="deepseek-coder-v2:16b"),
             ],
             "router_fast": [RoleCandidate(provider="groq", model="fast-a")],
             "reasoner": [
                 RoleCandidate(provider="groq", model="reasoner-a"),
-                RoleCandidate(provider="ollama-colab", model="deepseek-v4-pro"),
+                RoleCandidate(provider="ollama-colab", model="deepseek-coder-v2:16b"),
             ],
             "fallback_long_context": [RoleCandidate(provider="groq", model="fallback-a")],
         }
@@ -323,7 +323,7 @@ def test_startup_falls_through_to_the_colab_ollama_fallback_when_groq_is_exhaust
         available_providers={"groq", "ollama-colab"},
         live_ids_by_provider={
             "groq": {"fast-a", "fallback-a"},
-            "ollama-colab": {"deepseek-v4-pro"},
+            "ollama-colab": {"deepseek-coder-v2:16b"},
         },
     )
     router = Router(models, client)
@@ -331,8 +331,8 @@ def test_startup_falls_through_to_the_colab_ollama_fallback_when_groq_is_exhaust
     router.validate_startup()
 
     assert router.resolve("primary_coder") == RoleCandidate(
-        provider="ollama-colab", model="deepseek-v4-pro"
+        provider="ollama-colab", model="deepseek-coder-v2:16b"
     )
     assert router.resolve("reasoner") == RoleCandidate(
-        provider="ollama-colab", model="deepseek-v4-pro"
+        provider="ollama-colab", model="deepseek-coder-v2:16b"
     )
