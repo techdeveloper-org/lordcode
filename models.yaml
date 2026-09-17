@@ -137,6 +137,41 @@ providers:
     # budget on an uncapped <think> trace -- every model picked above is
     # explicitly documented as non-reasoning for exactly this reason.
 
+  ollama-colab:
+    # Colab-hosted Ollama, reached over an ngrok tunnel. ngrok, not
+    # cloudflared: a cloudflared quick tunnel (trycloudflare.com) was tried
+    # first (#71) and consistently returned 403 Forbidden directly from
+    # Cloudflare's edge on every request -- reproduced across 3 fresh
+    # tunnels, both QUIC and HTTP/2, from two independent networks. ngrok
+    # works, with one catch confirmed live in ollama.log: Ollama's own
+    # server-side Host-header check (a DNS-rebinding protection, unrelated to
+    # OLLAMA_ORIGINS, which only governs browser CORS Origin headers) 403s
+    # the tunnel's public hostname unless ngrok.connect() is called with
+    # host_header="localhost:11434" -- see colab/ollama_colab_server.ipynb.
+    # The real URL is session-scoped (Colab disconnects after ~12h or on
+    # idle -- and sometimes silently resets the backend while the notebook UI
+    # still shows "Connected", wiping the installed binary and pulled models,
+    # not just the tunnel), so it is read from OLLAMA_COLAB_BASE_URL (set in
+    # .env, which is already gitignored) rather than written here --
+    # models.yaml is git-tracked and a live unauthenticated tunnel URL has no
+    # business in commit history. Update the env var after every Colab
+    # restart. The literal below is an RFC 2606 .invalid placeholder that
+    # never resolves -- inert until this candidate is actually reached (this
+    # is the last candidate in its roles, so a healthy Groq means it may
+    # never be probed that session), at which point it fails gracefully as an
+    # ordinary candidate-skip via the existing reachability-error handling,
+    # rather than silently pointing calls at a stale host.
+    base_url: https://not-set.invalid/v1
+    base_url_env: OLLAMA_COLAB_BASE_URL
+    api_key_required: false
+    # No published ceiling (free Colab GPU, single session) and no billing --
+    # nominal budget, not a quoted limit. Lower than the local ollama block's
+    # 600 because requests also cross the tunnel's network hop.
+    rpm_budget: 120
+    # Omitted deliberately, same reasoning as the local ollama block: no real
+    # ceiling exists to floor a number against, so this disables token
+    # accounting rather than inventing one.
+
 # Switched fully to Groq (2026-09-11) -- NVIDIA NIM removed entirely.
 # NVIDIA's free tier was blocked by two separate, unresolved issues: a
 # platform-level 403 "Authorization failed" bug on Personal-org accounts,
@@ -166,9 +201,24 @@ roles:
     # correct code on a live test call.
     - {provider: groq, model: openai/gpt-oss-120b}
     - {provider: groq, model: openai/gpt-oss-20b}
+    # Last-resort fallback once both Groq candidates are exhausted -- see the
+    # ollama-colab provider block above for the tunnel/env-var setup.
+    # Live-tested from this account (#71): a direct /api/generate call
+    # against the Colab-hosted instance returned a real completion. Chosen
+    # over deepseek-v4-pro, which turned out to be Ollama's *cloud*-hosted
+    # tier (returns 401 Unauthorized without an ollama.com sign-in) rather
+    # than a locally-run model -- deepseek-coder-v2:16b is a real MoE model
+    # (16B total / ~2.4B active params) that fits the T4's ~15GB VRAM and
+    # runs entirely on the Colab GPU, no account needed.
+    - {provider: ollama-colab, model: deepseek-coder-v2:16b}
   router_fast:
     # Smallest/fastest model -- confirmed ~0.3s response, exactly the
     # "cheap and quick" role needs (classification only).
+    # Deliberately NOT given an ollama-colab fallback: this role's small
+    # max_tokens budget is exactly where calling.py's light-reasoning
+    # prefix gap (see _LIGHT_REASONING_EFFORT_BY_MODEL_PREFIX) bites hardest
+    # on an unverified reasoning-capable model -- same reasoning the xkiro
+    # block above documents for its own router_fast candidates.
     - {provider: groq, model: openai/gpt-oss-20b}
     - {provider: groq, model: openai/gpt-oss-120b}
   reasoner:
@@ -178,6 +228,10 @@ roles:
     # reasoning pass.
     - {provider: groq, model: qwen/qwen3.6-27b}
     - {provider: groq, model: openai/gpt-oss-120b}
+    # Last-resort fallback -- see primary_coder's ollama-colab entry above
+    # for why deepseek-coder-v2:16b was chosen and live-verified over
+    # deepseek-v4-pro.
+    - {provider: ollama-colab, model: deepseek-coder-v2:16b}
   fallback_long_context:
     - {provider: groq, model: openai/gpt-oss-120b}
     - {provider: groq, model: openai/gpt-oss-20b}
